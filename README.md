@@ -84,11 +84,11 @@ o g           open git-screen menu
 
   in repo (top level):
     b   branches submenu  → s switch / c create / d delete / D force-delete / r remote-delete
-    s   git status (popup)
+    s   stash submenu     → s push / p pop / a apply / l list / S show / d drop / c clear / b branch
     c   commit submenu    → c commit selected / C commit all / a amend / h history graph / l log -10
     f   git fetch --all --prune
-    p   git push   (auto-prompts for remote/upstream on first push)
-    P   git pull   (auto-prompts for remote/upstream when missing)
+    p   git push   (in-yazi output; conflict-aware: rebase + retry or force-with-lease)
+    P   git pull   (in-yazi output; merge conflicts → list files + offer merge --abort)
     d   git diff of hovered file (delta or $PAGER)
     r   refresh footer indicator
 

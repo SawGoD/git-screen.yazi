@@ -186,6 +186,46 @@ local clear_selection = ya.sync(function()
   ya.emit("escape", { select = true })
 end)
 
+-- Capture git invocation output. Returns (success, combined_text).
+local function git_capture(cwd, args)
+  local out, err = Command("git")
+    :cwd(cwd)
+    :arg(args)
+    :stdout(Command.PIPED)
+    :stderr(Command.PIPED)
+    :output()
+  if not out then return false, tostring(err or "spawn failed") end
+  local txt = (out.stdout or "") .. (out.stderr or "")
+  return out.status.success, (txt:gsub("%s+$", ""))
+end
+
+-- Long-lived notification for command output. level: "info" | "warn" | "error".
+local function show_output(title, body, level)
+  ya.notify {
+    title = title,
+    content = (body == "" and "(empty output)" or body),
+    timeout = 20.0,
+    level = level or "info",
+  }
+end
+
+-- Ensure a remote exists; returns first remote name or nil if user cancelled.
+local function ensure_remote(cwd)
+  local remotes = run(cwd, { "remote" }) or ""
+  if remotes ~= "" then return (split_lines(remotes))[1] end
+
+  local url, uevt = input_fn {
+    title = "Add remote `origin` URL:",
+    value = "",
+    pos = { "center", w = 70 },
+  }
+  if uevt ~= 1 or not url or trim(url) == "" then return nil end
+  local _, re = run(cwd, { "remote", "add", "origin", trim(url) })
+  if re then notify("remote add failed: " .. re, "error"); return nil end
+  notify("added origin: " .. trim(url))
+  return "origin"
+end
+
 ------------------------------------------------------------
 -- Commands (async; entry is a coroutine)
 ------------------------------------------------------------
@@ -324,6 +364,183 @@ local function cmd_branch_menu()
   end
 end
 
+------------------------------------------------------------
+-- Stash submenu (o g s)
+------------------------------------------------------------
+
+-- Pick a stash from `git stash list`; returns "stash@{N}" or nil.
+local function pick_stash(cwd, hint)
+  local out, err = run(cwd, { "stash", "list", "--format=%gd|%gs" })
+  if err then notify("stash list failed: " .. err, "error"); return nil end
+  if not out or out == "" then notify("no stashes", "warn"); return nil end
+
+  local keys = "abcdefghijklmnopqrstuvwxyz0123456789"
+  local cands, mapping = {}, {}
+  for i, line in ipairs(split_lines(out)) do
+    if i > #keys then break end
+    local ref, subj = line:match("^([^|]+)|(.*)$")
+    if ref then
+      local k = keys:sub(i, i)
+      cands[#cands + 1] = {
+        on = k,
+        desc = string.format("[%s] %s  %s", hint or "stash", ref, subj or ""),
+      }
+      mapping[i] = ref
+    end
+  end
+  local idx = which_fn { cands = cands }
+  if not idx then return nil end
+  return mapping[idx]
+end
+
+local function cmd_stash_push()
+  local cwd, st = require_repo(); if not cwd then return end
+  if not st.dirty then notify("nothing to stash (clean tree)", "warn"); return end
+
+  local msg, evt = input_fn {
+    title = "Stash message (empty = WIP):",
+    pos = { "center", w = 60 },
+  }
+  if evt ~= 1 then return end
+  msg = trim(msg or "")
+
+  local args = { "stash", "push", "-u" }
+  if msg ~= "" then args[#args + 1] = "-m"; args[#args + 1] = msg end
+
+  local _, err = run(cwd, args)
+  if err then notify("stash push failed: " .. err, "error"); return end
+  clear_selection()
+  notify("stashed" .. (msg ~= "" and (": " .. msg) or ""))
+  refresh()
+end
+
+-- Apply or pop most-recent if only one stash, else pick.
+local function cmd_stash_apply_or_pop(pop)
+  local cwd = require_repo(); if not cwd then return end
+  local list = run(cwd, { "stash", "list" }) or ""
+  if list == "" then notify("no stashes", "warn"); return end
+
+  local target
+  if #split_lines(list) == 1 then
+    target = "stash@{0}"
+  else
+    target = pick_stash(cwd, pop and "pop" or "apply")
+    if not target then return end
+  end
+
+  local ok, output = git_capture(cwd, { "stash", pop and "pop" or "apply", target })
+  if ok then
+    notify((pop and "popped " or "applied ") .. target)
+  else
+    show_output((pop and "stash pop" or "stash apply") .. " ✗", output, "error")
+  end
+  refresh()
+end
+
+local function cmd_stash_list()
+  local cwd = require_repo(); if not cwd then return end
+  local list = run(cwd, { "stash", "list" }) or ""
+  if list == "" then notify("no stashes", "warn"); return end
+  local pager = os.getenv("PAGER") or "less -R"
+  local cmd = "cd " .. string.format("%q", cwd)
+    .. " && git --no-pager stash list --color=always"
+    .. " --format='%C(yellow)%gd%C(reset)  %C(cyan)%cr%C(reset)  %gs' | " .. pager
+  emit_shell((cmd:gsub("%%", "%%%%")))  -- escape % for yazi shell expansion
+end
+
+local function cmd_stash_show()
+  local cwd = require_repo(); if not cwd then return end
+  local list = run(cwd, { "stash", "list" }) or ""
+  if list == "" then notify("no stashes", "warn"); return end
+
+  local target
+  if #split_lines(list) == 1 then
+    target = "stash@{0}"
+  else
+    target = pick_stash(cwd, "show diff")
+    if not target then return end
+  end
+  local pager = os.getenv("PAGER") or "less -R"
+  local viewer = (os.execute("command -v delta >/dev/null 2>&1") == 0) and "delta" or pager
+  emit_shell("cd " .. string.format("%q", cwd)
+    .. " && git stash show -p --color=always " .. target .. " | " .. viewer)
+end
+
+local function cmd_stash_drop()
+  local cwd = require_repo(); if not cwd then return end
+  local target = pick_stash(cwd, "DROP")
+  if not target then return end
+
+  local cands = {
+    { on = "y", desc = "drop " .. target .. " (irreversible)" },
+    { on = "<Left>", desc = "← cancel" },
+  }
+  local idx = which_fn { cands = cands }
+  if not idx or cands[idx].on ~= "y" then return end
+  local _, err = run(cwd, { "stash", "drop", target })
+  if err then notify("drop failed: " .. err, "error"); return end
+  notify("dropped " .. target)
+end
+
+local function cmd_stash_clear()
+  local cwd = require_repo(); if not cwd then return end
+  local list = run(cwd, { "stash", "list" }) or ""
+  if list == "" then notify("no stashes to clear", "warn"); return end
+  local count = #split_lines(list)
+  local cands = {
+    { on = "y", desc = "CLEAR all " .. count .. " stash(es) (irreversible)" },
+    { on = "<Left>", desc = "← cancel" },
+  }
+  local idx = which_fn { cands = cands }
+  if not idx or cands[idx].on ~= "y" then return end
+  local _, err = run(cwd, { "stash", "clear" })
+  if err then notify("clear failed: " .. err, "error"); return end
+  notify("cleared " .. count .. " stash(es)")
+end
+
+local function cmd_stash_branch()
+  local cwd = require_repo(); if not cwd then return end
+  local target = pick_stash(cwd, "→ new branch")
+  if not target then return end
+  local name, evt = input_fn {
+    title = "Branch name from " .. target .. ":",
+    pos = { "center", w = 60 },
+  }
+  if evt ~= 1 or not name or trim(name) == "" then return end
+  local _, err = run(cwd, { "stash", "branch", trim(name), target })
+  if err then notify("stash branch failed: " .. err, "error"); return end
+  notify("created branch `" .. trim(name) .. "` from " .. target)
+  refresh()
+end
+
+local function cmd_stash_menu()
+  if not require_repo() then return end
+  local cands = {
+    { on = "s", desc = "stash push -u (with optional message)" },
+    { on = "p", desc = "pop (latest, or pick)" },
+    { on = "a", desc = "apply (latest, or pick)" },
+    { on = "l", desc = "list (compact, in pager)" },
+    { on = "S", desc = "show diff (pick stash)" },
+    { on = "d", desc = "drop (pick + confirm)" },
+    { on = "c", desc = "clear ALL (confirm)" },
+    { on = "b", desc = "branch from stash (pick + name)" },
+    { on = "<Left>", desc = "← back" },
+  }
+  local idx = which_fn { cands = cands }
+  if not idx then return end
+  local key = cands[idx].on
+  if     key == "s" then cmd_stash_push()
+  elseif key == "p" then cmd_stash_apply_or_pop(true)
+  elseif key == "a" then cmd_stash_apply_or_pop(false)
+  elseif key == "l" then cmd_stash_list()
+  elseif key == "S" then cmd_stash_show()
+  elseif key == "d" then cmd_stash_drop()
+  elseif key == "c" then cmd_stash_clear()
+  elseif key == "b" then cmd_stash_branch()
+  elseif key == "<Left>" then cmd_menu()
+  end
+end
+
 -- yazi substitutes %h/%d/%a/%n/etc in shell commands. Escape with %% so
 -- yazi passes a literal % to the shell where git/date can use it.
 local function sh_pct(s) return (s:gsub("%%", "%%%%")) end
@@ -403,46 +620,6 @@ local function cmd_commit_selected()
   notify(string.format("Committed %d file(s): %s",
     #files, out and out:match("[^\n]+") or msg))
   refresh()
-end
-
--- Capture git invocation output. Returns (success, combined_text).
-local function git_capture(cwd, args)
-  local out, err = Command("git")
-    :cwd(cwd)
-    :arg(args)
-    :stdout(Command.PIPED)
-    :stderr(Command.PIPED)
-    :output()
-  if not out then return false, tostring(err or "spawn failed") end
-  local txt = (out.stdout or "") .. (out.stderr or "")
-  return out.status.success, (txt:gsub("%s+$", ""))
-end
-
--- Long-lived notification for command output. level: "info" | "warn" | "error".
-local function show_output(title, body, level)
-  ya.notify {
-    title = title,
-    content = (body == "" and "(empty output)" or body),
-    timeout = 20.0,
-    level = level or "info",
-  }
-end
-
--- Ensure a remote exists; returns first remote name or nil if user cancelled.
-local function ensure_remote(cwd)
-  local remotes = run(cwd, { "remote" }) or ""
-  if remotes ~= "" then return (split_lines(remotes))[1] end
-
-  local url, uevt = input_fn {
-    title = "Add remote `origin` URL:",
-    value = "",
-    pos = { "center", w = 70 },
-  }
-  if uevt ~= 1 or not url or trim(url) == "" then return nil end
-  local _, re = run(cwd, { "remote", "add", "origin", trim(url) })
-  if re then notify("remote add failed: " .. re, "error"); return nil end
-  notify("added origin: " .. trim(url))
-  return "origin"
 end
 
 local function cmd_push()
@@ -643,7 +820,7 @@ cmd_menu = function()
   else
     cands = {
       { on = "b", desc = "branches menu (switch / create / delete / remote-delete)" },
-      { on = "s", desc = "status" },
+      { on = "s", desc = "stash menu (push / pop / apply / list / show / drop / clear / branch)" },
       { on = "c", desc = "commit menu (commit / amend / history / log)" },
       { on = "f", desc = "fetch --all --prune" },
       { on = "p", desc = "push" },
@@ -659,7 +836,7 @@ cmd_menu = function()
 
   if     key == "i" then cmd_init()
   elseif key == "b" then cmd_branch_menu()
-  elseif key == "s" then cmd_status()
+  elseif key == "s" then cmd_stash_menu()
   elseif key == "c" then cmd_commit_menu()
   elseif key == "f" then cmd_fetch()
   elseif key == "p" then cmd_push()
@@ -689,6 +866,7 @@ function M:entry(job)
     elseif sub == "switch"   then cmd_branch_switch()
     elseif sub == "history"  then cmd_history()
     elseif sub == "status"   then cmd_status()
+    elseif sub == "stash"    then cmd_stash_menu()
     elseif sub == "commit"   then cmd_commit()
     elseif sub == "amend"    then cmd_amend()
     elseif sub == "log10"    then cmd_log10()
