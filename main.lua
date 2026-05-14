@@ -79,13 +79,40 @@ local function cmd_stash_menu()
   end
 end
 
-local function cmd_gitignore_menu()
+-- forward-decl so cmd_local_exclude_menu can go back to parent.
+local cmd_gitignore_menu
+
+local function cmd_local_exclude_menu()
+  if not C.require_repo() then return end
+  local cands = {
+    { on = "i", desc = "local ignore (.git/info/exclude)" },
+    { on = "t", desc = "local track (negate `!rule`)" },
+    { on = "p", desc = "local pattern input" },
+    { on = "l", desc = "list local rules (in pager)" },
+    { on = "r", desc = "remove local rule (picker)" },
+    { on = "<Left>", desc = "← back" },
+  }
+  local idx = U.which_fn { cands = cands }
+  if not idx then return end
+  local key = cands[idx].on
+  if     key == "i" then C.exclude_add()
+  elseif key == "t" then C.exclude_negate()
+  elseif key == "p" then C.exclude_pattern()
+  elseif key == "l" then C.exclude_list()
+  elseif key == "r" then C.exclude_remove()
+  elseif key == "<Left>" then cmd_gitignore_menu()
+  end
+end
+
+cmd_gitignore_menu = function()
   if not C.require_repo() then return end
   local cands = {
     { on = "i", desc = "ignore selected/hovered" },
     { on = "t", desc = "track (negate `!rule`) selected/hovered" },
     { on = "p", desc = "pattern input (e.g. *.log, build/)" },
+    { on = "l", desc = "list rules (in pager)" },
     { on = "r", desc = "remove rule (picker)" },
+    { on = "x", desc = "local exclude submenu (.git/info/exclude)" },
     { on = "<Left>", desc = "← back" },
   }
   local idx = U.which_fn { cands = cands }
@@ -94,7 +121,9 @@ local function cmd_gitignore_menu()
   if     key == "i" then C.gitignore_add()
   elseif key == "t" then C.gitignore_negate()
   elseif key == "p" then C.gitignore_pattern()
+  elseif key == "l" then C.gitignore_list()
   elseif key == "r" then C.gitignore_remove()
+  elseif key == "x" then cmd_local_exclude_menu()
   elseif key == "<Left>" then cmd_menu()
   end
 end

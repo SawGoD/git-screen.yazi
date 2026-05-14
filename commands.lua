@@ -374,9 +374,23 @@ end
 -- .gitignore
 ----------------------------------------------------------
 
-local function gi_path(cwd)
+-- scope: "repo" → <root>/.gitignore (committed)
+--        "local" → <git-dir>/info/exclude (personal, never committed)
+local function gi_path(cwd, scope)
   local root = U.repo_root(cwd)
-  return root and (root .. "/.gitignore") or nil, root
+  if not root then return nil, nil end
+  if scope == "local" then
+    local gitdir = U.run(cwd, { "rev-parse", "--absolute-git-dir" })
+    if not gitdir or gitdir == "" then return nil, root end
+    -- ensure .git/info exists (it usually does, but worktrees may differ)
+    os.execute("mkdir -p " .. string.format("%q", gitdir .. "/info") .. " 2>/dev/null")
+    return gitdir .. "/info/exclude", root
+  end
+  return root .. "/.gitignore", root
+end
+
+local function gi_scope_label(scope)
+  return scope == "local" and ".git/info/exclude" or ".gitignore"
 end
 
 -- Read all lines. Missing file is treated as empty (file is created on write).
@@ -571,44 +585,42 @@ local function gi_apply_one(cwd, root, gi_file, abs_path, want_track)
   end
 end
 
-local function gi_add_selection(negate)
+local function gi_add_selection(negate, scope)
   local cwd = require_repo(); if not cwd then return end
-  local gi_file, root = gi_path(cwd); if not gi_file then return end
+  local gi_file, root = gi_path(cwd, scope); if not gi_file then return end
+  local label = gi_scope_label(scope)
 
   local files = U.get_selected()
-  U.dbg("gi: selected count=", #files, "files=", table.concat(files, ","))
+  U.dbg("gi[" .. label .. "]: selected count=", #files)
   if #files == 0 then U.notify("no files selected/hovered", "warn"); return end
 
   local changes = {}
   for _, p in ipairs(files) do
-    U.dbg("gi: apply", p, "negate=", negate)
     local ok, status = gi_apply_one(cwd, root, gi_file, p, negate)
-    U.dbg("gi: result ok=", ok, "status=", status or "nil")
     if ok then changes[#changes + 1] = status end
   end
   if #changes > 0 then
     U.clear_selection()
-    U.notify(string.format("%s %d change(s):\n  %s",
-      negate and "track" or "ignore", #changes, table.concat(changes, "\n  ")))
+    U.notify(string.format("[%s] %s %d change(s):\n  %s",
+      label, negate and "track" or "ignore",
+      #changes, table.concat(changes, "\n  ")))
     U.refresh()
   end
 end
 
-function C.gitignore_add() gi_add_selection(false) end
-function C.gitignore_negate() gi_add_selection(true) end
-
-function C.gitignore_pattern()
+local function gitignore_pattern(scope)
   local cwd = require_repo(); if not cwd then return end
-  local gi_file, _ = gi_path(cwd); if not gi_file then return end
+  local gi_file, _ = gi_path(cwd, scope); if not gi_file then return end
+  local label = gi_scope_label(scope)
 
   local pat, evt = U.input_fn {
-    title = "Pattern (e.g. *.log, build/, .DS_Store):",
-    pos = { "center", w = 60 },
+    title = "Pattern → " .. label .. " (e.g. *.log, build/, .DS_Store):",
+    pos = { "center", w = 70 },
   }
   if evt ~= 1 or not pat or U.trim(pat) == "" then return end
   pat = U.trim(pat)
   if gi_is_forbidden(pat) then
-    U.notify("refusing to add `" .. pat .. "` to .gitignore", "warn"); return
+    U.notify("refusing to add `" .. pat .. "` to " .. label, "warn"); return
   end
 
   local cands = {
@@ -621,7 +633,6 @@ function C.gitignore_pattern()
   local key = cands[idx].on
   if key == "<Left>" then return end
 
-  -- Warn before ignoring VCS metadata (only when adding a non-negate rule).
   if key == "i" then
     local sensitive = gi_sensitive_match(pat)
     if sensitive and not gi_confirm_sensitive(sensitive, pat) then return end
@@ -631,21 +642,24 @@ function C.gitignore_pattern()
   gi_ensure_file(gi_file)
   local res, werr = gi_append_rule(gi_file, rule)
   if werr then U.notify("write failed: " .. werr, "error"); return end
-  if res == "exists" then U.notify("already in .gitignore: " .. rule, "warn"); return end
-  U.notify("added: " .. rule)
+  if res == "exists" then
+    U.notify("already in " .. label .. ": " .. rule, "warn"); return
+  end
+  U.notify("[" .. label .. "] added: " .. rule)
   U.refresh()
 end
 
-function C.gitignore_remove()
+local function gitignore_remove(scope)
   local cwd = require_repo(); if not cwd then return end
-  local gi_file, _ = gi_path(cwd); if not gi_file then return end
+  local gi_file, _ = gi_path(cwd, scope); if not gi_file then return end
+  local label = gi_scope_label(scope)
 
   local f = io.open(gi_file, "r")
-  if not f then U.notify(".gitignore not found", "warn"); return end
+  if not f then U.notify(label .. " not found", "warn"); return end
   f:close()
 
   local rules, all_lines = gi_active_rules(gi_file)
-  if #rules == 0 then U.notify("no rules in .gitignore", "warn"); return end
+  if #rules == 0 then U.notify("no rules in " .. label, "warn"); return end
 
   local keys = "abcdefghijklmnopqrstuvwxyz0123456789"
   local cands, mapping = {}, {}
@@ -662,20 +676,47 @@ function C.gitignore_remove()
   if not idx then return end
   local target = mapping[idx]
 
-  -- splice out target.idx, preserving comments / blanks
   local new_lines = {}
   for i, line in ipairs(all_lines) do
     if i ~= target.idx then new_lines[#new_lines + 1] = line end
   end
-  -- trim trailing blank if file ends with multiple blank lines
   while #new_lines > 0 and U.trim(new_lines[#new_lines]) == "" do
     new_lines[#new_lines] = nil
   end
   local ok, werr = gi_write(gi_file, new_lines)
   if not ok then U.notify("write failed: " .. werr, "error"); return end
-  U.notify("removed: " .. target.text)
+  U.notify("[" .. label .. "] removed: " .. target.text)
   U.refresh()
 end
+
+local function gitignore_list(scope)
+  local cwd = require_repo(); if not cwd then return end
+  local gi_file, _ = gi_path(cwd, scope); if not gi_file then return end
+  local label = gi_scope_label(scope)
+
+  local f = io.open(gi_file, "r")
+  if not f then U.notify(label .. " not found (no rules yet)", "warn"); return end
+  -- empty-file shortcut
+  local first = f:read("*l")
+  f:close()
+  if not first then U.notify(label .. " is empty", "warn"); return end
+
+  local pager = os.getenv("PAGER") or "less -R"
+  U.emit_shell("cat " .. string.format("%q", gi_file) ..
+    " | " .. pager)
+end
+
+function C.gitignore_add()      gi_add_selection(false, "repo") end
+function C.gitignore_negate()   gi_add_selection(true,  "repo") end
+function C.gitignore_pattern()  gitignore_pattern("repo") end
+function C.gitignore_remove()   gitignore_remove("repo") end
+function C.gitignore_list()     gitignore_list("repo") end
+
+function C.exclude_add()        gi_add_selection(false, "local") end
+function C.exclude_negate()     gi_add_selection(true,  "local") end
+function C.exclude_pattern()    gitignore_pattern("local") end
+function C.exclude_remove()     gitignore_remove("local") end
+function C.exclude_list()       gitignore_list("local") end
 
 ----------------------------------------------------------
 -- Sync (fetch / push / pull)
