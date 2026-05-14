@@ -469,6 +469,14 @@ local function gi_ensure_file(path)
   if w then w:close() end
 end
 
+-- Paths/patterns that must never end up in .gitignore (with or without `!`).
+-- Touching .git/ would break the repo; ignoring .gitignore itself is a
+-- pointless footgun (the file would silently stop being committed).
+local function gi_is_forbidden(rule)
+  local s = rule:gsub("^!", ""):gsub("/+$", "")
+  return s == ".git" or s:sub(1, 5) == ".git/" or s == ".gitignore"
+end
+
 -- Apply ignore-or-track for one path. Reconciles contradictions:
 -- adding track removes any matching ignore line; adding ignore removes any
 -- matching negate. After cleanup, only appends a rule if it's actually
@@ -480,6 +488,10 @@ local function gi_apply_one(cwd, root, gi_file, abs_path, want_track)
   local base_rule = gi_normalize(abs_path, root, is_dir, false)
   if not base_rule then
     U.notify("path outside repo: " .. abs_path, "warn"); return false
+  end
+  if gi_is_forbidden(base_rule) then
+    U.notify("refusing to touch " .. base_rule .. " in .gitignore", "warn")
+    return false
   end
   local negate_rule = "!" .. base_rule
   gi_ensure_file(gi_file)
@@ -565,6 +577,9 @@ function C.gitignore_pattern()
   }
   if evt ~= 1 or not pat or U.trim(pat) == "" then return end
   pat = U.trim(pat)
+  if gi_is_forbidden(pat) then
+    U.notify("refusing to add `" .. pat .. "` to .gitignore", "warn"); return
+  end
 
   local cands = {
     { on = "i", desc = "add as ignore: " .. pat },
