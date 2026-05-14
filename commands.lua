@@ -443,9 +443,11 @@ local function gi_remove_lines(path, rule)
   return removed
 end
 
--- `git check-ignore -q <path>`: exit 0 = ignored, exit 1 = not ignored.
+-- `git check-ignore --no-index -q <path>`: exit 0 = matched by a rule,
+-- exit 1 = not matched. --no-index makes the check rule-only; without it,
+-- tracked files are reported as "not ignored" even if a pattern matches.
 local function gi_is_ignored(cwd, abs_path)
-  local _, err = U.run(cwd, { "check-ignore", "-q", "--", abs_path })
+  local _, err = U.run(cwd, { "check-ignore", "--no-index", "-q", "--", abs_path })
   return err == nil
 end
 
@@ -532,11 +534,14 @@ local function gi_add_selection(negate)
   local gi_file, root = gi_path(cwd); if not gi_file then return end
 
   local files = U.get_selected()
+  U.dbg("gi: selected count=", #files, "files=", table.concat(files, ","))
   if #files == 0 then U.notify("no files selected/hovered", "warn"); return end
 
   local changes = {}
   for _, p in ipairs(files) do
+    U.dbg("gi: apply", p, "negate=", negate)
     local ok, status = gi_apply_one(cwd, root, gi_file, p, negate)
+    U.dbg("gi: result ok=", ok, "status=", status or "nil")
     if ok then changes[#changes + 1] = status end
   end
   if #changes > 0 then

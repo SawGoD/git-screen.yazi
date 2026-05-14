@@ -43,10 +43,20 @@ U.get_hovered = ya.sync(function()
 end)
 
 -- Selected files (multi-select via Space). Falls back to hovered if empty.
+-- yazi's `cx.active.selected` shape differs across versions — accept either
+-- {Url -> idx} or {idx -> Url}. Filter to entries whose tostring(...) looks
+-- like a path (contains '/').
 U.get_selected = ya.sync(function()
   local paths = {}
-  for _, u in pairs(cx.active.selected or {}) do
-    paths[#paths + 1] = tostring(u)
+  local seen = {}
+  for k, v in pairs(cx.active.selected or {}) do
+    for _, candidate in ipairs({ k, v }) do
+      local s = tostring(candidate)
+      if s:find("/") and not seen[s] then
+        paths[#paths + 1] = s
+        seen[s] = true
+      end
+    end
   end
   if #paths == 0 then
     local h = cx.active.current.hovered
