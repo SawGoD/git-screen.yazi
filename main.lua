@@ -79,6 +79,26 @@ local function cmd_stash_menu()
   end
 end
 
+local function cmd_gitignore_menu()
+  if not C.require_repo() then return end
+  local cands = {
+    { on = "i", desc = "ignore selected/hovered" },
+    { on = "t", desc = "track (negate `!rule`) selected/hovered" },
+    { on = "p", desc = "pattern input (e.g. *.log, build/)" },
+    { on = "r", desc = "remove rule (picker)" },
+    { on = "<Left>", desc = "← back" },
+  }
+  local idx = U.which_fn { cands = cands }
+  if not idx then return end
+  local key = cands[idx].on
+  if     key == "i" then C.gitignore_add()
+  elseif key == "t" then C.gitignore_negate()
+  elseif key == "p" then C.gitignore_pattern()
+  elseif key == "r" then C.gitignore_remove()
+  elseif key == "<Left>" then cmd_menu()
+  end
+end
+
 local function cmd_commit_menu()
   if not C.require_repo() then return end
   local cands = {
@@ -114,6 +134,7 @@ cmd_menu = function()
       { on = "b", desc = "branches menu (switch / create / delete / remote-delete)" },
       { on = "s", desc = "stash menu (push / pop / apply / list / show / drop / clear / branch)" },
       { on = "c", desc = "commit menu (commit / amend / history / log)" },
+      { on = "i", desc = "gitignore menu (ignore / track / pattern / remove)" },
       { on = "f", desc = "fetch --all --prune" },
       { on = "p", desc = "push" },
       { on = "P", desc = "pull" },
@@ -126,7 +147,8 @@ cmd_menu = function()
   if not idx then return end
   local key = cands[idx].on
 
-  if     key == "i" then C.init()
+  if     key == "i" and not st.is_repo then C.init()
+  elseif key == "i" then cmd_gitignore_menu()
   elseif key == "b" then cmd_branch_menu()
   elseif key == "s" then cmd_stash_menu()
   elseif key == "c" then cmd_commit_menu()
@@ -159,6 +181,7 @@ function M:entry(job)
     elseif sub == "history"  then C.history()
     elseif sub == "status"   then C.status()
     elseif sub == "stash"    then cmd_stash_menu()
+    elseif sub == "gitignore" then cmd_gitignore_menu()
     elseif sub == "commit"   then C.commit_all()
     elseif sub == "amend"    then C.amend()
     elseif sub == "log10"    then C.log10()

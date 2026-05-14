@@ -371,6 +371,208 @@ function C.diff()
 end
 
 ----------------------------------------------------------
+-- .gitignore
+----------------------------------------------------------
+
+local function gi_path(cwd)
+  local root = U.repo_root(cwd)
+  return root and (root .. "/.gitignore") or nil, root
+end
+
+-- Read all lines. Missing file is treated as empty (file is created on write).
+local function gi_read(path)
+  local f = io.open(path, "r")
+  if not f then return {} end
+  local lines = {}
+  for line in f:lines() do lines[#lines + 1] = line end
+  f:close()
+  return lines
+end
+
+local function gi_write(path, lines)
+  local f, err = io.open(path, "w")
+  if not f then return false, err end
+  for _, line in ipairs(lines) do f:write(line, "\n") end
+  f:close()
+  return true
+end
+
+-- Convert (abs path, is_dir, negate) → canonical .gitignore rule string.
+-- - repo-relative
+-- - trailing `/` for dirs, none for files
+-- - `!` prefix for negate
+local function gi_normalize(abs_path, root, is_dir, negate)
+  local rel = U.relpath(abs_path, root)
+  if not rel or rel == "" then return nil end
+  rel = rel:gsub("^%./", ""):gsub("/+", "/"):gsub("/+$", "")
+  if is_dir then rel = rel .. "/" end
+  return (negate and "!" or "") .. rel
+end
+
+-- Extract just the rule text from a .gitignore line (strip negate, trim).
+local function gi_rule_text(line)
+  local s = U.trim(line)
+  if s == "" or s:sub(1, 1) == "#" then return nil end
+  return s
+end
+
+-- Append `rule` to .gitignore if not present. Returns "added" or "exists".
+local function gi_append_rule(path, rule)
+  local lines = gi_read(path)
+  for _, line in ipairs(lines) do
+    if gi_rule_text(line) == rule then return "exists" end
+  end
+  lines[#lines + 1] = rule
+  local ok, err = gi_write(path, lines)
+  if not ok then return nil, err end
+  return "added"
+end
+
+-- Pick rule lines for the remove-picker; returns list of {idx, text}.
+local function gi_active_rules(path)
+  local lines = gi_read(path)
+  local rules = {}
+  for i, line in ipairs(lines) do
+    local r = gi_rule_text(line)
+    if r then rules[#rules + 1] = { idx = i, text = r } end
+  end
+  return rules, lines
+end
+
+local function gi_ensure_file(path)
+  local f = io.open(path, "r")
+  if f then f:close(); return end
+  local w = io.open(path, "w")
+  if w then w:close() end
+end
+
+-- Add a single file path to .gitignore (or negate). Handles tracked-file
+-- warning + offer to `git rm --cached`. Returns true on success, false if
+-- user cancelled or path was outside repo.
+local function gi_apply_one(cwd, root, gi_file, abs_path, negate)
+  local is_dir = U.path_is_dir(abs_path)
+  local rule = gi_normalize(abs_path, root, is_dir, negate)
+  if not rule then
+    U.notify("path outside repo: " .. abs_path, "warn"); return false
+  end
+
+  -- tracked check (only meaningful for non-negate adds)
+  if not negate and U.is_tracked(cwd, abs_path) then
+    local cands = {
+      { on = "y", desc = "git rm --cached " .. rule .. " + add ignore" },
+      { on = "<Left>", desc = "← skip (already tracked; ignore won't take effect)" },
+    }
+    local idx = U.which_fn { cands = cands }
+    if not idx or cands[idx].on ~= "y" then return false end
+    local _, rerr = U.run(cwd, { "rm", "--cached", "-r", "--", abs_path })
+    if rerr then U.notify("rm --cached failed: " .. rerr, "error"); return false end
+  end
+
+  gi_ensure_file(gi_file)
+  local res, werr = gi_append_rule(gi_file, rule)
+  if werr then U.notify("write failed: " .. werr, "error"); return false end
+  if res == "exists" then
+    U.notify("already in .gitignore: " .. rule, "warn")
+    return false
+  end
+  return true, rule
+end
+
+local function gi_add_selection(negate)
+  local cwd = require_repo(); if not cwd then return end
+  local gi_file, root = gi_path(cwd); if not gi_file then return end
+
+  local files = U.get_selected()
+  if #files == 0 then U.notify("no files selected/hovered", "warn"); return end
+
+  local added = {}
+  for _, p in ipairs(files) do
+    local ok, rule = gi_apply_one(cwd, root, gi_file, p, negate)
+    if ok then added[#added + 1] = rule end
+  end
+  if #added > 0 then
+    U.clear_selection()
+    U.notify(string.format("%s %d rule(s):\n  %s",
+      negate and "tracked" or "ignored", #added, table.concat(added, "\n  ")))
+    U.refresh()
+  end
+end
+
+function C.gitignore_add() gi_add_selection(false) end
+function C.gitignore_negate() gi_add_selection(true) end
+
+function C.gitignore_pattern()
+  local cwd = require_repo(); if not cwd then return end
+  local gi_file, _ = gi_path(cwd); if not gi_file then return end
+
+  local pat, evt = U.input_fn {
+    title = "Pattern (e.g. *.log, build/, .DS_Store):",
+    pos = { "center", w = 60 },
+  }
+  if evt ~= 1 or not pat or U.trim(pat) == "" then return end
+  pat = U.trim(pat)
+
+  local cands = {
+    { on = "i", desc = "add as ignore: " .. pat },
+    { on = "t", desc = "add as track (negate): !" .. pat },
+    { on = "<Left>", desc = "← cancel" },
+  }
+  local idx = U.which_fn { cands = cands }
+  if not idx then return end
+  local key = cands[idx].on
+  if key == "<Left>" then return end
+
+  local rule = (key == "t" and "!" or "") .. pat
+  gi_ensure_file(gi_file)
+  local res, werr = gi_append_rule(gi_file, rule)
+  if werr then U.notify("write failed: " .. werr, "error"); return end
+  if res == "exists" then U.notify("already in .gitignore: " .. rule, "warn"); return end
+  U.notify("added: " .. rule)
+  U.refresh()
+end
+
+function C.gitignore_remove()
+  local cwd = require_repo(); if not cwd then return end
+  local gi_file, _ = gi_path(cwd); if not gi_file then return end
+
+  local f = io.open(gi_file, "r")
+  if not f then U.notify(".gitignore not found", "warn"); return end
+  f:close()
+
+  local rules, all_lines = gi_active_rules(gi_file)
+  if #rules == 0 then U.notify("no rules in .gitignore", "warn"); return end
+
+  local keys = "abcdefghijklmnopqrstuvwxyz0123456789"
+  local cands, mapping = {}, {}
+  for i, r in ipairs(rules) do
+    if i > #keys then break end
+    local k = keys:sub(i, i)
+    cands[#cands + 1] = {
+      on = k,
+      desc = string.format("[remove] %s  (line %d)", r.text, r.idx),
+    }
+    mapping[i] = r
+  end
+  local idx = U.which_fn { cands = cands }
+  if not idx then return end
+  local target = mapping[idx]
+
+  -- splice out target.idx, preserving comments / blanks
+  local new_lines = {}
+  for i, line in ipairs(all_lines) do
+    if i ~= target.idx then new_lines[#new_lines + 1] = line end
+  end
+  -- trim trailing blank if file ends with multiple blank lines
+  while #new_lines > 0 and U.trim(new_lines[#new_lines]) == "" do
+    new_lines[#new_lines] = nil
+  end
+  local ok, werr = gi_write(gi_file, new_lines)
+  if not ok then U.notify("write failed: " .. werr, "error"); return end
+  U.notify("removed: " .. target.text)
+  U.refresh()
+end
+
+----------------------------------------------------------
 -- Sync (fetch / push / pull)
 ----------------------------------------------------------
 function C.fetch()

@@ -205,6 +205,42 @@ function U.render_status()
 end
 
 ------------------------------------------------------------
+-- Path / repo helpers
+------------------------------------------------------------
+
+-- Absolute path of the repo root, or nil if cwd is not inside a git repo.
+function U.repo_root(cwd)
+  local top = U.run(cwd, { "rev-parse", "--show-toplevel" })
+  return (top and top ~= "") and top or nil
+end
+
+-- Returns abs path relative to root, or nil if abs is outside root.
+function U.relpath(abs, root)
+  if not abs or not root then return nil end
+  abs = abs:gsub("/+$", "")
+  root = root:gsub("/+$", "")
+  if abs == root then return "" end
+  if abs:sub(1, #root + 1) == root .. "/" then
+    return abs:sub(#root + 2)
+  end
+  return nil
+end
+
+-- True if path exists and is a directory (yazi fs.cha is sync-safe).
+U.path_is_dir = ya.sync(function(_, abs)
+  if not abs then return false end
+  local ok, cha = pcall(fs.cha, Url(abs))
+  if not ok or not cha then return false end
+  return cha.is_dir == true
+end)
+
+-- True if `git ls-files --error-unmatch <path>` succeeds (path is tracked).
+function U.is_tracked(cwd, abs_path)
+  local _, err = U.run(cwd, { "ls-files", "--error-unmatch", "--", abs_path })
+  return err == nil
+end
+
+------------------------------------------------------------
 -- ensure_remote: shared by push/pull on first-time setup
 ------------------------------------------------------------
 function U.ensure_remote(cwd)
