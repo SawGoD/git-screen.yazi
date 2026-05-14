@@ -428,6 +428,27 @@ local function gi_append_rule(path, rule)
   return "added"
 end
 
+-- Remove all exact-matching rule lines. Returns count removed.
+local function gi_remove_lines(path, rule)
+  local lines = gi_read(path)
+  local kept, removed = {}, 0
+  for _, line in ipairs(lines) do
+    if gi_rule_text(line) == rule then
+      removed = removed + 1
+    else
+      kept[#kept + 1] = line
+    end
+  end
+  if removed > 0 then gi_write(path, kept) end
+  return removed
+end
+
+-- `git check-ignore -q <path>`: exit 0 = ignored, exit 1 = not ignored.
+local function gi_is_ignored(cwd, abs_path)
+  local _, err = U.run(cwd, { "check-ignore", "-q", "--", abs_path })
+  return err == nil
+end
+
 -- Pick rule lines for the remove-picker; returns list of {idx, text}.
 local function gi_active_rules(path)
   local lines = gi_read(path)
@@ -446,36 +467,64 @@ local function gi_ensure_file(path)
   if w then w:close() end
 end
 
--- Add a single file path to .gitignore (or negate). Handles tracked-file
--- warning + offer to `git rm --cached`. Returns true on success, false if
--- user cancelled or path was outside repo.
-local function gi_apply_one(cwd, root, gi_file, abs_path, negate)
+-- Apply ignore-or-track for one path. Reconciles contradictions:
+-- adding track removes any matching ignore line; adding ignore removes any
+-- matching negate. After cleanup, only appends a rule if it's actually
+-- needed (according to `git check-ignore`).
+-- Returns (ok_bool, status_string).
+--   status: "added <rule>" | "cleaned (no rule needed)" | nil
+local function gi_apply_one(cwd, root, gi_file, abs_path, want_track)
   local is_dir = U.path_is_dir(abs_path)
-  local rule = gi_normalize(abs_path, root, is_dir, negate)
-  if not rule then
+  local base_rule = gi_normalize(abs_path, root, is_dir, false)
+  if not base_rule then
     U.notify("path outside repo: " .. abs_path, "warn"); return false
   end
-
-  -- tracked check (only meaningful for non-negate adds)
-  if not negate and U.is_tracked(cwd, abs_path) then
-    local cands = {
-      { on = "y", desc = "git rm --cached " .. rule .. " + add ignore" },
-      { on = "<Left>", desc = "← skip (already tracked; ignore won't take effect)" },
-    }
-    local idx = U.which_fn { cands = cands }
-    if not idx or cands[idx].on ~= "y" then return false end
-    local _, rerr = U.run(cwd, { "rm", "--cached", "-r", "--", abs_path })
-    if rerr then U.notify("rm --cached failed: " .. rerr, "error"); return false end
-  end
-
+  local negate_rule = "!" .. base_rule
   gi_ensure_file(gi_file)
-  local res, werr = gi_append_rule(gi_file, rule)
-  if werr then U.notify("write failed: " .. werr, "error"); return false end
-  if res == "exists" then
-    U.notify("already in .gitignore: " .. rule, "warn")
-    return false
+
+  if want_track then
+    -- Track: remove any exact ignore line; add negate only if still ignored.
+    local removed = gi_remove_lines(gi_file, base_rule)
+    if gi_is_ignored(cwd, abs_path) then
+      -- Still covered by a broader pattern → explicit negate is needed.
+      local res, werr = gi_append_rule(gi_file, negate_rule)
+      if werr then U.notify("write failed: " .. werr, "error"); return false end
+      if res == "exists" then
+        U.notify("already tracked: " .. negate_rule, "warn"); return false
+      end
+      return true, "added " .. negate_rule
+    elseif removed > 0 then
+      return true, "removed ignore for " .. base_rule
+    else
+      U.notify("not ignored: " .. base_rule, "warn"); return false
+    end
+  else
+    -- Ignore: remove any exact negate; add rule only if not already covered.
+    -- Prompt for `rm --cached` if file is currently tracked.
+    if U.is_tracked(cwd, abs_path) then
+      local cands = {
+        { on = "y", desc = "git rm --cached " .. base_rule .. " + add ignore" },
+        { on = "<Left>", desc = "← skip (file is tracked; ignore won't take effect)" },
+      }
+      local idx = U.which_fn { cands = cands }
+      if not idx or cands[idx].on ~= "y" then return false end
+      local _, rerr = U.run(cwd, { "rm", "--cached", "-r", "--", abs_path })
+      if rerr then U.notify("rm --cached failed: " .. rerr, "error"); return false end
+    end
+
+    local removed = gi_remove_lines(gi_file, negate_rule)
+    if gi_is_ignored(cwd, abs_path) then
+      -- Already covered (either by another rule, or by removing the negate).
+      if removed > 0 then return true, "removed track for " .. base_rule end
+      U.notify("already ignored: " .. base_rule, "warn"); return false
+    end
+    local res, werr = gi_append_rule(gi_file, base_rule)
+    if werr then U.notify("write failed: " .. werr, "error"); return false end
+    if res == "exists" then
+      U.notify("already in .gitignore: " .. base_rule, "warn"); return false
+    end
+    return true, "added " .. base_rule
   end
-  return true, rule
 end
 
 local function gi_add_selection(negate)
@@ -485,15 +534,15 @@ local function gi_add_selection(negate)
   local files = U.get_selected()
   if #files == 0 then U.notify("no files selected/hovered", "warn"); return end
 
-  local added = {}
+  local changes = {}
   for _, p in ipairs(files) do
-    local ok, rule = gi_apply_one(cwd, root, gi_file, p, negate)
-    if ok then added[#added + 1] = rule end
+    local ok, status = gi_apply_one(cwd, root, gi_file, p, negate)
+    if ok then changes[#changes + 1] = status end
   end
-  if #added > 0 then
+  if #changes > 0 then
     U.clear_selection()
-    U.notify(string.format("%s %d rule(s):\n  %s",
-      negate and "tracked" or "ignored", #added, table.concat(added, "\n  ")))
+    U.notify(string.format("%s %d change(s):\n  %s",
+      negate and "track" or "ignore", #changes, table.concat(changes, "\n  ")))
     U.refresh()
   end
 end
