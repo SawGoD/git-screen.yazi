@@ -88,73 +88,56 @@ When the current directory is **not** a git repo, only one entry is shown:
 | --- | ----------------- |
 | `i` | init repo here    |
 
-When inside a git repo:
+When inside a git repo, the full menu (with submenus) is shown below. `←`
+always returns to the parent menu.
 
-| Key | Action                                                                     |
-| --- | -------------------------------------------------------------------------- |
-| `b` | open **branches** submenu                                                  |
-| `s` | open **stash** submenu                                                     |
-| `c` | open **commit** submenu                                                    |
-| `f` | `git fetch --all --prune` (silent + footer refresh)                        |
-| `p` | `git push` (auto-prompts for remote/upstream; handles rejected pushes)     |
-| `P` | `git pull` (auto-prompts for upstream; surfaces merge conflicts)           |
-| `d` | `git diff` of hovered file (delta if available, else `$PAGER`)             |
-| `r` | force-refresh footer indicator                                             |
-
-### Branches submenu (`o g b`)
-
-| Key | Action                                                                     |
-| --- | -------------------------------------------------------------------------- |
-| `s` | switch branch (picker)                                                     |
-| `c` | create branch from current (input name)                                    |
-| `d` | delete local branch (`git branch -d`)                                      |
-| `D` | force-delete local branch with unmerged commits (`git branch -D`)          |
-| `r` | delete REMOTE branch (`git push <remote> --delete <branch>`)               |
-| `←` | back to top-level                                                          |
-
-### Stash submenu (`o g s`)
-
-| Key | Action                                                                     |
-| --- | -------------------------------------------------------------------------- |
-| `s` | `git stash push -u` with optional message input (`-m`)                     |
-| `p` | pop — picks if many stashes, else `stash@{0}`                              |
-| `a` | apply (same picker logic, keeps stash on the list)                         |
-| `l` | list all stashes in pager (compact: ref · relative date · subject)         |
-| `S` | show diff of picked stash (delta if available, else `$PAGER`)              |
-| `d` | drop picked stash (`y/← cancel` confirmation)                              |
-| `c` | clear ALL stashes (`y/← cancel` confirmation; shows count)                 |
-| `b` | create branch from picked stash (`git stash branch`) — input branch name   |
-| `←` | back to top-level                                                          |
-
-### Commit submenu (`o g c`)
-
-| Key | Action                                                                     |
-| --- | -------------------------------------------------------------------------- |
-| `c` | commit **selected files** (Space-marked), or hovered if none selected      |
-| `C` | commit **all** changes (`git add -A`)                                      |
-| `a` | amend last commit — input is pre-filled with current message               |
-| `h` | commit-graph history (`git log --graph --decorate --all`) in pager         |
-| `l` | last 10 commits in compact table (`%h | %an | dd.mm.yy HH:MM | %s`)        |
-| `←` | back to top-level                                                          |
+| Trigger | Sub             | Key | Action                                              |
+| ------- | --------------- | --- | --------------------------------------------------- |
+| `o g`   | `b · branches`  | `s` | switch branch (picker)                              |
+|         |                 | `c` | create branch from current (input name)             |
+|         |                 | `d` | delete local branch (-d)                            |
+|         |                 | `D` | force-delete local branch (-D; unmerged)            |
+|         |                 | `r` | delete REMOTE branch (push --delete)                |
+|         |                 | `←` | back                                                |
+|         | `s · stash`     | `s` | stash push -u (optional message)                    |
+|         |                 | `p` | pop (latest, or pick if many)                       |
+|         |                 | `a` | apply (latest, or pick if many)                     |
+|         |                 | `l` | list (compact, in pager)                            |
+|         |                 | `S` | show (diff of picked stash)                         |
+|         |                 | `d` | drop (pick + confirm)                               |
+|         |                 | `c` | clear ALL stashes (confirm; shows count)            |
+|         |                 | `b` | branch from stash (pick + name input)               |
+|         |                 | `←` | back                                                |
+|         | `c · commit`    | `c` | commit SELECTED (Space-marked) or hovered           |
+|         |                 | `C` | commit ALL (add -A)                                 |
+|         |                 | `a` | amend last commit (msg pre-filled)                  |
+|         |                 | `h` | commit-graph history (in pager)                     |
+|         |                 | `l` | last 10 commits (compact table, in pager)           |
+|         |                 | `←` | back                                                |
+|         | `f · fetch`     |     | git fetch --all --prune (silent + refresh)          |
+|         | `p · push`      |     | auto-prompts remote/upstream; handles rejected push |
+|         | `P · pull`      |     | auto-prompts upstream; surfaces merge conflicts     |
+|         | `d · diff`      |     | git diff of hovered file (delta or $PAGER)          |
+|         | `r · refresh`   |     | force-refresh footer indicator                      |
 
 ### Conflict prompts
 
-Some actions follow up with another picker when something needs a decision:
+Some actions follow up with another picker when something needs a decision.
 
 **Push rejected (non-fast-forward):**
 
-| Key | Action                                                                     |
-| --- | -------------------------------------------------------------------------- |
-| `p` | `git pull --rebase`, then retry `git push`                                 |
-| `f` | `git push --force-with-lease`                                              |
-| `←` | cancel                                                                     |
+| Key | Action                                       |
+| --- | -------------------------------------------- |
+| `p` | `git pull --rebase`, then retry `git push`   |
+| `f` | `git push --force-with-lease`                |
+| `←` | cancel                                       |
 
 **Pull → merge conflict:**
 
-| Key | Action                                                                     |
-| --- | -------------------------------------------------------------------------- |
-| `a` | `git merge --abort` (roll back the pull)                                   |
-| `←` | keep conflicts in place to resolve manually                                |
+| Key | Action                                       |
+| --- | -------------------------------------------- |
+| `a` | `git merge --abort` (roll back the pull)     |
+| `←` | keep conflicts in place to resolve manually  |
 
 ## Troubleshooting
 
