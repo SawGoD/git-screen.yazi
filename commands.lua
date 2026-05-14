@@ -469,12 +469,35 @@ local function gi_ensure_file(path)
   if w then w:close() end
 end
 
--- Paths/patterns that must never end up in .gitignore (with or without `!`).
--- Touching .git/ would break the repo; ignoring .gitignore itself is a
--- pointless footgun (the file would silently stop being committed).
+-- Hard-block: never write these to .gitignore. They'd break the repo or
+-- are nonsensical to ignore.
 local function gi_is_forbidden(rule)
   local s = rule:gsub("^!", ""):gsub("/+$", "")
   return s == ".git" or s:sub(1, 5) == ".git/" or s == ".gitignore"
+end
+
+-- Soft-warn: VCS / forge metadata that's almost always committed. Adding
+-- these to .gitignore is usually a mistake — require explicit confirmation.
+-- Returns the offending top-level name (".github", etc.) or nil.
+local GI_SENSITIVE = {
+  ".gitattributes", ".gitmodules", ".mailmap", ".github", ".gitlab",
+}
+local function gi_sensitive_match(rule)
+  local s = rule:gsub("^!", ""):gsub("/+$", "")
+  for _, name in ipairs(GI_SENSITIVE) do
+    if s == name or s:sub(1, #name + 1) == name .. "/" then return name end
+  end
+  return nil
+end
+
+-- Returns true if the user confirmed proceeding with a sensitive ignore.
+local function gi_confirm_sensitive(name, rule)
+  local cands = {
+    { on = "y", desc = "yes — ignore " .. rule .. " anyway" },
+    { on = "<Left>", desc = "← cancel (recommended for `" .. name .. "`)" },
+  }
+  local idx = U.which_fn { cands = cands }
+  return idx and cands[idx].on == "y"
 end
 
 -- Apply ignore-or-track for one path. Reconciles contradictions:
@@ -492,6 +515,13 @@ local function gi_apply_one(cwd, root, gi_file, abs_path, want_track)
   if gi_is_forbidden(base_rule) then
     U.notify("refusing to touch " .. base_rule .. " in .gitignore", "warn")
     return false
+  end
+  -- Warn before ignoring VCS metadata (skip warning when negating).
+  if not want_track then
+    local sensitive = gi_sensitive_match(base_rule)
+    if sensitive and not gi_confirm_sensitive(sensitive, base_rule) then
+      return false
+    end
   end
   local negate_rule = "!" .. base_rule
   gi_ensure_file(gi_file)
@@ -590,6 +620,12 @@ function C.gitignore_pattern()
   if not idx then return end
   local key = cands[idx].on
   if key == "<Left>" then return end
+
+  -- Warn before ignoring VCS metadata (only when adding a non-negate rule).
+  if key == "i" then
+    local sensitive = gi_sensitive_match(pat)
+    if sensitive and not gi_confirm_sensitive(sensitive, pat) then return end
+  end
 
   local rule = (key == "t" and "!" or "") .. pat
   gi_ensure_file(gi_file)
