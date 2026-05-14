@@ -76,28 +76,85 @@ branch indicator, and `o g` should open the menu.
 
 ## Usage cheatsheet
 
-```
-o g           open git-screen menu
+Open with `o g`. In any submenu, `←` returns to the parent. `Esc` closes
+the menu entirely. Toasts only fire on explicit actions; navigation through
+directories silently refreshes the footer indicator.
 
-  in non-repo:
-    i   init repo here
+### Top-level menu (`o g`)
 
-  in repo (top level):
-    b   branches submenu  → s switch / c create / d delete / D force-delete / r remote-delete
-    s   stash submenu     → s push / p pop / a apply / l list / S show / d drop / c clear / b branch
-    c   commit submenu    → c commit selected / C commit all / a amend / h history graph / l log -10
-    f   git fetch --all --prune
-    p   git push   (in-yazi output; conflict-aware: rebase + retry or force-with-lease)
-    P   git pull   (in-yazi output; merge conflicts → list files + offer merge --abort)
-    d   git diff of hovered file (delta or $PAGER)
-    r   refresh footer indicator
+When the current directory is **not** a git repo, only one entry is shown:
 
-  inside any submenu:
-    ←   back to parent menu
-```
+| Key | Action            |
+| --- | ----------------- |
+| `i` | init repo here    |
 
-Toasts only fire on explicit actions; navigation through directories silently
-refreshes the indicator.
+When inside a git repo:
+
+| Key | Action                                                                     |
+| --- | -------------------------------------------------------------------------- |
+| `b` | open **branches** submenu                                                  |
+| `s` | open **stash** submenu                                                     |
+| `c` | open **commit** submenu                                                    |
+| `f` | `git fetch --all --prune` (silent + footer refresh)                        |
+| `p` | `git push` (auto-prompts for remote/upstream; handles rejected pushes)     |
+| `P` | `git pull` (auto-prompts for upstream; surfaces merge conflicts)           |
+| `d` | `git diff` of hovered file (delta if available, else `$PAGER`)             |
+| `r` | force-refresh footer indicator                                             |
+
+### Branches submenu (`o g b`)
+
+| Key | Action                                                                     |
+| --- | -------------------------------------------------------------------------- |
+| `s` | switch branch (picker)                                                     |
+| `c` | create branch from current (input name)                                    |
+| `d` | delete local branch (`git branch -d`)                                      |
+| `D` | force-delete local branch with unmerged commits (`git branch -D`)          |
+| `r` | delete REMOTE branch (`git push <remote> --delete <branch>`)               |
+| `←` | back to top-level                                                          |
+
+### Stash submenu (`o g s`)
+
+| Key | Action                                                                     |
+| --- | -------------------------------------------------------------------------- |
+| `s` | `git stash push -u` with optional message input (`-m`)                     |
+| `p` | pop — picks if many stashes, else `stash@{0}`                              |
+| `a` | apply (same picker logic, keeps stash on the list)                         |
+| `l` | list all stashes in pager (compact: ref · relative date · subject)         |
+| `S` | show diff of picked stash (delta if available, else `$PAGER`)              |
+| `d` | drop picked stash (`y/← cancel` confirmation)                              |
+| `c` | clear ALL stashes (`y/← cancel` confirmation; shows count)                 |
+| `b` | create branch from picked stash (`git stash branch`) — input branch name   |
+| `←` | back to top-level                                                          |
+
+### Commit submenu (`o g c`)
+
+| Key | Action                                                                     |
+| --- | -------------------------------------------------------------------------- |
+| `c` | commit **selected files** (Space-marked), or hovered if none selected      |
+| `C` | commit **all** changes (`git add -A`)                                      |
+| `a` | amend last commit — input is pre-filled with current message               |
+| `h` | commit-graph history (`git log --graph --decorate --all`) in pager         |
+| `l` | last 10 commits in compact table (`%h | %an | dd.mm.yy HH:MM | %s`)        |
+| `←` | back to top-level                                                          |
+
+### Conflict prompts
+
+Some actions follow up with another picker when something needs a decision:
+
+**Push rejected (non-fast-forward):**
+
+| Key | Action                                                                     |
+| --- | -------------------------------------------------------------------------- |
+| `p` | `git pull --rebase`, then retry `git push`                                 |
+| `f` | `git push --force-with-lease`                                              |
+| `←` | cancel                                                                     |
+
+**Pull → merge conflict:**
+
+| Key | Action                                                                     |
+| --- | -------------------------------------------------------------------------- |
+| `a` | `git merge --abort` (roll back the pull)                                   |
+| `←` | keep conflicts in place to resolve manually                                |
 
 ## Troubleshooting
 
@@ -115,6 +172,18 @@ refreshes the indicator.
 
 ```
 ~/.config/yazi/plugins/git-screen.yazi/
-├── main.lua        plugin source
+├── main.lua        setup, entry router, menus (top + 3 submenus)
+├── util.lua        state, helpers, footer renderer, ensure_remote
+├── commands.lua    all git operations (init / branches / stash / commit / sync)
 └── README.md       this file
 ```
+
+`main.lua` is the entry point yazi loads via `require("git-screen"):setup()`.
+It pulls in the other two via `require("git-screen.util")` and
+`require("git-screen.commands")`. Yazi's plugin loader maps dotted module
+names to sibling files inside the plugin directory.
+
+Both `util.lua` and `commands.lua` return plain tables — **not factories.**
+Yazi rejects modules that return a function with `error converting Lua
+function to table`. `commands.lua` imports util itself instead of receiving
+it as an argument.
