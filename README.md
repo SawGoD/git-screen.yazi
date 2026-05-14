@@ -5,13 +5,19 @@ lightweight git client:
 
 - **footer indicator** — current branch + `↑ahead ↓behind`, colored by state
   (green clean / yellow dirty / red conflict);
-- **`o g` menu** — branch ops, commit (selected / all / amend), history graph,
-  fetch / push / pull, diff, init;
-- **selection-aware commit** — `c` commits the files marked with `<Space>` in
-  yazi; falls back to the hovered file if nothing is selected;
+- **`o g` menu** — branch ops, stash, commit (selected / all / amend), history
+  graph, fetch / push / pull, diff, init, and a full `.gitignore` / local
+  exclude editor;
+- **selection-aware** — `c` commits / `i` adds to .gitignore for the files
+  marked with `<Space>` in yazi; falls back to the hovered file if nothing
+  is selected;
 - **auto-prompts** — when `git push` / `git pull` need a remote or upstream
   that isn't configured, an input popup asks for it instead of dumping git's
-  hint text.
+  hint text;
+- **safe-by-default gitignore** — refuses to ignore `.git/` or `.gitignore`
+  itself; warns before ignoring VCS metadata (`.gitattributes`, `.mailmap`,
+  `.github`, `.gitlab`, `.gitmodules`); reconciles contradictions instead of
+  appending them.
 
 ## Requirements
 
@@ -114,30 +120,53 @@ always returns to the parent menu.
 |         |                 | `h` | commit-graph history (in pager)                     |
 |         |                 | `l` | last 10 commits (compact table, in pager)           |
 |         |                 | `←` | back                                                |
+|         | `i · gitignore` | `i` | ignore SELECTED (Space-marked) or hovered           |
+|         |                 | `t` | track (negate `!rule`) selected/hovered             |
+|         |                 | `p` | pattern input (e.g. `*.log`, `build/`)              |
+|         |                 | `l` | list .gitignore rules (in pager)                    |
+|         |                 | `r` | remove rule (picker)                                |
+|         |                 | `x` | open **local exclude** submenu (see below)          |
+|         |                 | `←` | back                                                |
 |         | `f · fetch`     |     | git fetch --all --prune (silent + refresh)          |
 |         | `p · push`      |     | auto-prompts remote/upstream; handles rejected push |
 |         | `P · pull`      |     | auto-prompts upstream; surfaces merge conflicts     |
 |         | `d · diff`      |     | git diff of hovered file (delta or $PAGER)          |
 |         | `r · refresh`   |     | force-refresh footer indicator                      |
 
-### Conflict prompts
+### Local exclude submenu (`o g i x`)
 
-Some actions follow up with another picker when something needs a decision.
+Operates on `.git/info/exclude` instead of `.gitignore`. Rules added here
+never leave your machine — perfect for personal mess (editor swap files,
+local scratch dirs, etc.) without committing them to the team's ignore
+list. Same set of actions as the parent submenu:
 
-**Push rejected (non-fast-forward):**
+| Key | Action                                                |
+| --- | ----------------------------------------------------- |
+| `i` | local ignore SELECTED/hovered                         |
+| `t` | local track (negate `!rule`)                          |
+| `p` | local pattern input                                   |
+| `l` | list current local rules (in pager)                   |
+| `r` | remove local rule (picker)                            |
+| `←` | back to gitignore submenu                             |
 
-| Key | Action                                       |
-| --- | -------------------------------------------- |
-| `p` | `git pull --rebase`, then retry `git push`   |
-| `f` | `git push --force-with-lease`                |
-| `←` | cancel                                       |
+### Confirmation prompts
 
-**Pull → merge conflict:**
+Several actions follow up with a small `y` / `←` picker before doing
+anything destructive or otherwise surprising:
 
-| Key | Action                                       |
-| --- | -------------------------------------------- |
-| `a` | `git merge --abort` (roll back the pull)     |
-| `←` | keep conflicts in place to resolve manually  |
+| Where it fires                                              | Choices                                                              |
+| ----------------------------------------------------------- | -------------------------------------------------------------------- |
+| `o g s d` (drop stash)                                      | `y` drop · `←` cancel                                                |
+| `o g s c` (clear ALL stashes)                               | `y` clear · `←` cancel                                               |
+| ignore a tracked file                                       | `y` `git rm --cached` + add ignore · `←` skip                        |
+| ignore VCS metadata (`.gitattributes`, `.mailmap`, `.github`, `.gitlab`, `.gitmodules`) | `y` yes anyway · `←` cancel |
+| `o g i p` / `o g i x p` (pattern entered)                   | `i` add as ignore · `t` add as track (negate) · `←` cancel           |
+| **push rejected (non-fast-forward)**                        | `p` `pull --rebase` + retry · `f` `push --force-with-lease` · `←` cancel |
+| **pull → merge conflict**                                   | `a` `git merge --abort` · `←` keep conflicts to resolve manually     |
+
+A few paths/patterns are hard-blocked from `.gitignore` and
+`.git/info/exclude` with no override: `.git/` and anything under it, and
+`.gitignore` itself. Toast: *refusing to touch ... in .gitignore*.
 
 ## Troubleshooting
 
@@ -155,9 +184,9 @@ Some actions follow up with another picker when something needs a decision.
 
 ```
 ~/.config/yazi/plugins/git-screen.yazi/
-├── main.lua        setup, entry router, menus (top + 3 submenus)
+├── main.lua        setup, entry router, menus (top + 5 submenus)
 ├── util.lua        state, helpers, footer renderer, ensure_remote
-├── commands.lua    all git operations (init / branches / stash / commit / sync)
+├── commands.lua    all git operations (init / branches / stash / commit / gitignore / sync)
 └── README.md       this file
 ```
 
