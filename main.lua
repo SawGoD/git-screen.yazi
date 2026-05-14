@@ -405,86 +405,160 @@ local function cmd_commit_selected()
   refresh()
 end
 
+-- Capture git invocation output. Returns (success, combined_text).
+local function git_capture(cwd, args)
+  local out, err = Command("git")
+    :cwd(cwd)
+    :arg(args)
+    :stdout(Command.PIPED)
+    :stderr(Command.PIPED)
+    :output()
+  if not out then return false, tostring(err or "spawn failed") end
+  local txt = (out.stdout or "") .. (out.stderr or "")
+  return out.status.success, (txt:gsub("%s+$", ""))
+end
+
+-- Long-lived notification for command output. level: "info" | "warn" | "error".
+local function show_output(title, body, level)
+  ya.notify {
+    title = title,
+    content = (body == "" and "(empty output)" or body),
+    timeout = 20.0,
+    level = level or "info",
+  }
+end
+
+-- Ensure a remote exists; returns first remote name or nil if user cancelled.
+local function ensure_remote(cwd)
+  local remotes = run(cwd, { "remote" }) or ""
+  if remotes ~= "" then return (split_lines(remotes))[1] end
+
+  local url, uevt = input_fn {
+    title = "Add remote `origin` URL:",
+    value = "",
+    pos = { "center", w = 70 },
+  }
+  if uevt ~= 1 or not url or trim(url) == "" then return nil end
+  local _, re = run(cwd, { "remote", "add", "origin", trim(url) })
+  if re then notify("remote add failed: " .. re, "error"); return nil end
+  notify("added origin: " .. trim(url))
+  return "origin"
+end
+
 local function cmd_push()
   local cwd, st = require_repo(); if not cwd then return end
 
   local up = run(cwd, { "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}" })
+  local push_args
   if not up or up == "" then
-    -- no upstream yet — pick/add remote, then push with --set-upstream
-    local remotes = run(cwd, { "remote" }) or ""
-    if remotes == "" then
-      local url, uevt = input_fn {
-        title = "Add remote `origin` URL:",
-        value = "",
-        pos = { "center", w = 70 },
-      }
-      if uevt ~= 1 or not url or trim(url) == "" then return end
-      local _, re = run(cwd, { "remote", "add", "origin", trim(url) })
-      if re then notify("remote add failed: " .. re, "error"); return end
-      notify("added origin: " .. trim(url))
-      remotes = "origin"
-    end
-    local default_remote = (split_lines(remotes))[1] or "origin"
+    local remote = ensure_remote(cwd); if not remote then return end
 
     local ref, evt = input_fn {
-      title = "First push — push `" .. (st.branch or "?") .. "` to (remote/branch):",
-      value = default_remote .. "/" .. (st.branch or ""),
+      title = "First push — `" .. (st.branch or "?") .. "` → (remote/branch):",
+      value = remote .. "/" .. (st.branch or ""),
       pos = { "center", w = 60 },
     }
     if evt ~= 1 or not ref or trim(ref) == "" then return end
-    local remote, branch = trim(ref):match("^([^/]+)/(.+)$")
-    if not remote or not branch then
+    local r, b = trim(ref):match("^([^/]+)/(.+)$")
+    if not r or not b then
       notify("expected `remote/branch`, got: " .. ref, "error"); return
     end
-    emit_shell("cd " .. string.format("%q", cwd)
-      .. string.format(" && git push --set-upstream %q %s:%s;",
-        remote, st.branch or "HEAD", branch)
-      .. " echo; echo '[press any key]'; read -n1 _")
+    push_args = { "push", "--set-upstream", r, (st.branch or "HEAD") .. ":" .. b }
   else
-    emit_shell("cd " .. string.format("%q", cwd)
-      .. " && git push; echo; echo '[press any key]'; read -n1 _")
+    push_args = { "push" }
   end
+
+  local ok, output = git_capture(cwd, push_args)
   refresh()
+
+  if ok then
+    show_output("git push ✓", output, "info")
+    return
+  end
+
+  -- Detect non-fast-forward / rejected — offer remediation.
+  local lower = output:lower()
+  if lower:find("rejected") or lower:find("non%-fast%-forward") or lower:find("fetch first") then
+    show_output("push rejected", output, "warn")
+    local cands = {
+      { on = "p", desc = "pull --rebase then push (safe)" },
+      { on = "f", desc = "force push (--force-with-lease)" },
+      { on = "<Left>", desc = "← cancel" },
+    }
+    local idx = which_fn { cands = cands }
+    if not idx then return end
+    local key = cands[idx].on
+    if key == "p" then
+      local ok2, out2 = git_capture(cwd, { "pull", "--rebase" })
+      if not ok2 then show_output("pull --rebase failed", out2, "error"); refresh(); return end
+      show_output("rebased ✓ → retrying push", out2, "info")
+      local ok3, out3 = git_capture(cwd, { "push" })
+      show_output(ok3 and "git push ✓" or "git push ✗", out3, ok3 and "info" or "error")
+      refresh()
+    elseif key == "f" then
+      local ok2, out2 = git_capture(cwd, { "push", "--force-with-lease" })
+      show_output(ok2 and "force-push ✓" or "force-push ✗", out2, ok2 and "info" or "error")
+      refresh()
+    end
+    return
+  end
+
+  show_output("git push ✗", output, "error")
 end
 
 local function cmd_pull()
   local cwd, st = require_repo(); if not cwd then return end
 
-  -- check upstream tracking
   local up = run(cwd, { "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}" })
   if not up or up == "" then
-    -- no tracking — ask user for upstream ref
-    local remotes = run(cwd, { "remote" }) or ""
-    if remotes == "" then
-      local url, uevt = input_fn {
-        title = "Add remote `origin` URL:",
-        value = "",
-        pos = { "center", w = 70 },
-      }
-      if uevt ~= 1 or not url or trim(url) == "" then return end
-      local _, re = run(cwd, { "remote", "add", "origin", trim(url) })
-      if re then notify("remote add failed: " .. re, "error"); return end
-      notify("added origin: " .. trim(url))
-      remotes = "origin"
-    end
-    local default_remote = (split_lines(remotes))[1] or "origin"
-    local default_ref = default_remote .. "/" .. (st.branch or "")
-
+    local remote = ensure_remote(cwd); if not remote then return end
+    local default_ref = remote .. "/" .. (st.branch or "")
     local val, evt = input_fn {
       title = "Set upstream for `" .. (st.branch or "?") .. "` (remote/branch):",
       value = default_ref,
       pos = { "center", w = 60 },
     }
     if evt ~= 1 or not val or trim(val) == "" then return end
-
     local _, se = run(cwd, { "branch", "--set-upstream-to=" .. trim(val) })
     if se then notify("set-upstream failed: " .. se, "error"); return end
     notify("upstream set: " .. trim(val))
   end
 
-  emit_shell("cd " .. string.format("%q", cwd)
-    .. " && git pull; echo; echo '[press any key]'; read -n1 _")
+  local ok, output = git_capture(cwd, { "pull" })
   refresh()
+
+  if ok then
+    show_output("git pull ✓", output, "info")
+    return
+  end
+
+  -- Inspect for merge conflicts.
+  local conflicts = {}
+  local porcelain = run(cwd, { "diff", "--name-only", "--diff-filter=U" })
+  if porcelain and porcelain ~= "" then
+    for _, p in ipairs(split_lines(porcelain)) do conflicts[#conflicts + 1] = p end
+  end
+
+  if #conflicts > 0 then
+    local body = output .. "\n\nConflicted files:\n  " .. table.concat(conflicts, "\n  ")
+      .. "\n\nResolve, then commit. Or run `git merge --abort` to bail out."
+    show_output("pull → MERGE CONFLICT", body, "error")
+
+    local cands = {
+      { on = "a", desc = "git merge --abort (roll back pull)" },
+      { on = "<Left>", desc = "← keep conflicts to resolve manually" },
+    }
+    local idx = which_fn { cands = cands }
+    if idx and cands[idx].on == "a" then
+      local ok2, out2 = git_capture(cwd, { "merge", "--abort" })
+      show_output(ok2 and "merge --abort ✓" or "merge --abort ✗",
+        out2, ok2 and "info" or "error")
+      refresh()
+    end
+    return
+  end
+
+  show_output("git pull ✗", output, "error")
 end
 
 local function cmd_amend()
