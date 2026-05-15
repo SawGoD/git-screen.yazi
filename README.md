@@ -137,11 +137,12 @@ always returns to the parent menu.
 
 ### Templates submenu (`o g i T`)
 
-Appends a curated `.gitignore` template to the current file. Rules already
-present in the file are skipped — only missing ones are added, under a
-clearly marked `# --- <name> (git-screen template) ---` header. Section
-comments come along only when at least one rule from the section is new
-(no orphan headers).
+Replaces `.gitignore` with a curated template — fully rewritten, clean and
+predictable. Any rule the user had that **isn't** in the chosen template is
+preserved verbatim and moved to a `# --- Пользовательские (preserved by
+git-screen) ---` section at the end. Existing comments are not preserved
+(the template's own structure is used instead). Idempotent: applying the
+same template twice leaves the file unchanged.
 
 | Key | Template                                                  |
 | --- | --------------------------------------------------------- |

@@ -1025,9 +1025,21 @@ Thumbs.db
 ]],
 }
 
--- Append template content to .gitignore, skipping rules that already exist.
--- Section comments / blank lines are emitted only when followed by at least
--- one new rule, so we don't litter the file with orphaned headers.
+-- Split string into lines, preserving blanks (unlike U.split_lines).
+local function split_all_lines(s)
+  local t = {}
+  for line in (s .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+    t[#t + 1] = line
+  end
+  if #t > 0 and t[#t] == "" then t[#t] = nil end
+  return t
+end
+
+-- Replace .gitignore with the template content, preserving any rules the
+-- user already had that aren't part of the template — those move to a
+-- "Пользовательские" section appended at the end.
+-- Goal: a clean, predictable file after every apply, without losing user
+-- additions.
 local function gitignore_template(scope, name)
   local cwd = require_repo(); if not cwd then return end
   local gi_file, _ = gi_path(cwd, scope); if not gi_file then return end
@@ -1036,45 +1048,40 @@ local function gitignore_template(scope, name)
   if not content then U.notify("unknown template: " .. name, "warn"); return end
 
   gi_ensure_file(gi_file)
-  local existing_lines = gi_read(gi_file)
-  local existing = {}
-  for _, line in ipairs(existing_lines) do
+
+  -- All rules covered by the template (so we know what's "redundant" in
+  -- the existing file).
+  local template_rules = {}
+  for line in content:gmatch("[^\r\n]+") do
     local r = gi_rule_text(line)
-    if r then existing[r] = true end
+    if r then template_rules[r] = true end
   end
 
-  local pending, appended = {}, {}
-  local new_lines = {}
-  for line in content:gmatch("[^\r\n]*") do
-    local rule = gi_rule_text(line)
-    if rule then
-      if not existing[rule] then
-        for _, c in ipairs(pending) do new_lines[#new_lines + 1] = c end
-        pending = {}
-        new_lines[#new_lines + 1] = line
-        appended[#appended + 1] = rule
-        existing[rule] = true
-      end
-    else
-      pending[#pending + 1] = line
+  -- Collect existing user-only rules in order, deduped.
+  local existing_lines = gi_read(gi_file)
+  local user_rules, seen = {}, {}
+  for _, line in ipairs(existing_lines) do
+    local r = gi_rule_text(line)
+    if r and not template_rules[r] and not seen[r] then
+      user_rules[#user_rules + 1] = line
+      seen[r] = true
     end
   end
 
-  if #appended == 0 then
-    U.notify("[" .. label .. "] `" .. name .. "`: all rules already present", "warn")
-    return
-  end
+  -- Build output: template body, then optional user section.
+  local out = split_all_lines(content)
+  while #out > 0 and U.trim(out[#out]) == "" do out[#out] = nil end
 
-  local out = {}
-  for _, l in ipairs(existing_lines) do out[#out + 1] = l end
-  if #out > 0 and U.trim(out[#out]) ~= "" then out[#out + 1] = "" end
-  out[#out + 1] = "# --- " .. name .. " (git-screen template) ---"
-  for _, l in ipairs(new_lines) do out[#out + 1] = l end
+  if #user_rules > 0 then
+    out[#out + 1] = ""
+    out[#out + 1] = "# --- Пользовательские (preserved by git-screen) ---"
+    for _, r in ipairs(user_rules) do out[#out + 1] = r end
+  end
 
   local ok, werr = gi_write(gi_file, out)
   if not ok then U.notify("write failed: " .. werr, "error"); return end
-  U.notify(string.format("[%s] template %s: added %d rule(s)",
-    label, name, #appended))
+  U.notify(string.format("[%s] template `%s` applied (%d user rule(s) preserved)",
+    label, name, #user_rules))
   U.refresh()
 end
 
