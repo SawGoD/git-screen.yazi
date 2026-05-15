@@ -1074,7 +1074,7 @@ local function gitignore_template(scope, name)
 
   if #user_rules > 0 then
     out[#out + 1] = ""
-    out[#out + 1] = "# --- Пользовательские (preserved by git-screen) ---"
+    out[#out + 1] = "# --- User rules (preserved by git-screen) ---"
     for _, r in ipairs(user_rules) do out[#out + 1] = r end
   end
 

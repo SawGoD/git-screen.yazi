@@ -139,7 +139,7 @@ always returns to the parent menu.
 
 Replaces `.gitignore` with a curated template — fully rewritten, clean and
 predictable. Any rule the user had that **isn't** in the chosen template is
-preserved verbatim and moved to a `# --- Пользовательские (preserved by
+preserved verbatim and moved to a `# --- User rules (preserved by
 git-screen) ---` section at the end. Existing comments are not preserved
 (the template's own structure is used instead). Idempotent: applying the
 same template twice leaves the file unchanged.
