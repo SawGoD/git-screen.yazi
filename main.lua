@@ -2,18 +2,39 @@
 --- Layout:
 ---   main.lua      — setup, entry router, menus (top + submenus)
 ---   util.lua      — state, helpers, footer renderer
----   commands.lua  — all git operations (factory: takes util, returns table)
-
-local U = require("git-screen.util")
-local C = require("git-screen.commands")
-U.dbg("module loaded")
+---   commands.lua  — all git operations
 
 local M = {}
+
+-- Tiny local logger so we can record "module loaded" before util is pulled in.
+-- Windows-safe path: yazi has no portable temp dir helper, so check separator.
+local LOG = (package.config:sub(1, 1) == "\\")
+  and ((os.getenv("TEMP") or "C:\\Temp") .. "\\git-screen.log")
+  or "/tmp/git-screen.log"
+local function _dbg(...)
+  local parts = { os.date("%H:%M:%S"), "git-screen:" }
+  for i = 1, select("#", ...) do parts[#parts + 1] = tostring((select(i, ...))) end
+  local f = io.open(LOG, "a")
+  if f then f:write(table.concat(parts, " "), "\n"); f:close() end
+end
+_dbg("module loaded")
+
+-- Submodules are loaded LAZILY to avoid yazi's async-require nesting,
+-- which crashes on Windows with "attempt to yield across a C-call boundary".
+-- By the time setup()/entry() runs, the outer require("git-screen") has
+-- already completed, so a fresh require for siblings is no longer nested.
+local U, C
+local function lazy_load()
+  if U then return end
+  U = require("git-screen.util")
+  C = require("git-screen.commands")
+end
 
 ------------------------------------------------------------
 -- Setup (sync; runs from init.lua)
 ------------------------------------------------------------
 function M:setup()
+  lazy_load()
   U.dbg("setup")
   -- ps.sub("cd") callback runs sync (no coroutine); defer to async entry.
   ps.sub("cd", function()
@@ -193,6 +214,7 @@ end
 -- Entry (async — coroutine; required for Command:output)
 ------------------------------------------------------------
 function M:entry(job)
+  lazy_load()
   local sub = job and job.args and job.args[1]
   U.dbg("entry:", sub or "<nil>")
 

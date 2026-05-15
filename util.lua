@@ -7,7 +7,9 @@ local U = {}
 ------------------------------------------------------------
 -- Debug log (file-based, always on; level-independent)
 ------------------------------------------------------------
-local LOG = "/tmp/git-screen.log"
+local LOG = (package.config:sub(1, 1) == "\\")
+  and ((os.getenv("TEMP") or "C:\\Temp") .. "\\git-screen.log")
+  or "/tmp/git-screen.log"
 function U.dbg(...)
   local parts = { os.date("%H:%M:%S"), "git-screen:" }
   for i = 1, select("#", ...) do parts[#parts + 1] = tostring((select(i, ...))) end
@@ -225,10 +227,12 @@ function U.repo_root(cwd)
 end
 
 -- Returns abs path relative to root, or nil if abs is outside root.
+-- Normalizes `\` to `/` so Windows paths from yazi (often mixed `P:/dir\file`)
+-- align with `git rev-parse --show-toplevel` output (always forward slash).
 function U.relpath(abs, root)
   if not abs or not root then return nil end
-  abs = abs:gsub("/+$", "")
-  root = root:gsub("/+$", "")
+  abs = abs:gsub("\\", "/"):gsub("/+$", "")
+  root = root:gsub("\\", "/"):gsub("/+$", "")
   if abs == root then return "" end
   if abs:sub(1, #root + 1) == root .. "/" then
     return abs:sub(#root + 2)
@@ -248,6 +252,58 @@ end)
 function U.is_tracked(cwd, abs_path)
   local _, err = U.run(cwd, { "ls-files", "--error-unmatch", "--", abs_path })
   return err == nil
+end
+
+------------------------------------------------------------
+-- Temp-file pager (cross-platform replacement for shell pipes)
+-- Windows cmd.exe can't safely pass `%C(...)`-style git format strings
+-- through pipes — `%X` triggers env-var expansion. We capture output via
+-- Command (no shell), write it to a temp file, and feed the file to a
+-- pager that opens files directly (less, more, delta, $PAGER).
+------------------------------------------------------------
+
+local IS_WINDOWS = package.config:sub(1, 1) == "\\"
+
+function U.tmp_path(name)
+  local base = IS_WINDOWS
+    and (os.getenv("TEMP") or "C:\\Temp")
+    or "/tmp"
+  local sep = IS_WINDOWS and "\\" or "/"
+  return base .. sep .. (name or "git-screen-out.txt")
+end
+
+-- Capture stdout of `git <args>` in cwd. Returns text or (nil, err).
+function U.run_stdout(cwd, args)
+  local out, err = Command("git")
+    :cwd(cwd)
+    :arg(args)
+    :stdout(Command.PIPED)
+    :stderr(Command.PIPED)
+    :output()
+  if not out then return nil, tostring(err) end
+  if not out.status.success then
+    return nil, (out.stderr or ""):gsub("%s+$", "")
+  end
+  return out.stdout or ""
+end
+
+function U.write_tmp(text, name)
+  local p = U.tmp_path(name)
+  local f, err = io.open(p, "wb")
+  if not f then return nil, err end
+  f:write(text or "")
+  f:close()
+  return p
+end
+
+-- Show pre-rendered text in a pager. Pager picks: $PAGER, else `less -R`
+-- (works on Unix and git-for-Windows). `name` is the temp filename suffix.
+function U.page_text(text, name)
+  if not text or text == "" then U.notify("(empty output)", "warn"); return end
+  local path, werr = U.write_tmp(text, name)
+  if not path then U.notify("temp write failed: " .. werr, "error"); return end
+  local pager = os.getenv("PAGER") or "less -R"
+  U.emit_shell(pager .. " " .. string.format("%q", path))
 end
 
 ------------------------------------------------------------

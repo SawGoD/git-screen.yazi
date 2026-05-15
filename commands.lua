@@ -137,10 +137,10 @@ function C.branch_delete_remote()
   if not remote or not branch then
     U.notify("can't parse remote ref: " .. target, "error"); return
   end
-  U.emit_shell("cd " .. string.format("%q", cwd)
-    .. string.format(" && git push %q --delete %q;", remote, branch)
-    .. " echo; echo '[press any key]'; read -n1 _")
+  local ok, output = U.git_capture(cwd, { "push", remote, "--delete", branch })
   U.refresh()
+  U.show_output(ok and ("deleted " .. target .. " ✓") or ("delete " .. target .. " ✗"),
+    output, ok and "info" or "error")
 end
 
 ----------------------------------------------------------
@@ -193,10 +193,12 @@ function C.stash_list()
   local cwd = require_repo(); if not cwd then return end
   local list = U.run(cwd, { "stash", "list" }) or ""
   if list == "" then U.notify("no stashes", "warn"); return end
-  local pager = os.getenv("PAGER") or "less -R"
-  local fmt = U.sh_pct("%C(yellow)%gd%C(reset)  %C(cyan)%cr%C(reset)  %gs")
-  U.emit_shell("cd " .. string.format("%q", cwd)
-    .. " && git --no-pager stash list --color=always --format='" .. fmt .. "' | " .. pager)
+  local text, err = U.run_stdout(cwd, {
+    "--no-pager", "stash", "list", "--color=always",
+    "--format=%C(yellow)%gd%C(reset)  %C(cyan)%cr%C(reset)  %gs",
+  })
+  if err then U.notify("stash list failed: " .. err, "error"); return end
+  U.page_text(text, "git-screen-stash-list.txt")
 end
 
 function C.stash_show()
@@ -211,10 +213,10 @@ function C.stash_show()
     target = pick_stash(cwd, "show diff")
     if not target then return end
   end
-  local pager = os.getenv("PAGER") or "less -R"
-  local viewer = (os.execute("command -v delta >/dev/null 2>&1") == 0) and "delta" or pager
-  U.emit_shell("cd " .. string.format("%q", cwd)
-    .. " && git stash show -p --color=always " .. target .. " | " .. viewer)
+  local text, err = U.run_stdout(cwd,
+    { "stash", "show", "-p", "--color=always", target })
+  if err then U.notify("stash show failed: " .. err, "error"); return end
+  U.page_text(text, "git-screen-stash-show.txt")
 end
 
 function C.stash_drop()
@@ -268,23 +270,24 @@ end
 ----------------------------------------------------------
 function C.history()
   local cwd = require_repo(); if not cwd then return end
-  local pager = os.getenv("PAGER") or "less -R"
-  local fmt = U.sh_pct("%C(auto)%h%d %C(white)%s %C(dim)(%an, %ar)")
-  U.emit_shell("cd " .. string.format("%q", cwd)
-    .. " && git log --graph --decorate --all --color=always"
-    .. " --pretty=format:'" .. fmt .. "' | " .. pager)
+  local text, err = U.run_stdout(cwd, {
+    "log", "--graph", "--decorate", "--all", "--color=always",
+    "--pretty=format:%C(auto)%h%d %C(white)%s %C(dim)(%an, %ar)",
+  })
+  if err then U.notify("log failed: " .. err, "error"); return end
+  U.page_text(text, "git-screen-history.txt")
 end
 
 function C.log10()
   local cwd = require_repo(); if not cwd then return end
-  local pager = os.getenv("PAGER") or "less -R"
-  local fmt = U.sh_pct("%C(yellow)%h%C(reset) | %C(cyan)%an%C(reset) | "
-    .. "%C(green)%ad%C(reset) | %s")
-  local date = U.sh_pct("%d.%m.%y %H:%M")
-  U.emit_shell("cd " .. string.format("%q", cwd)
-    .. " && git log -10 --color=always"
-    .. " --pretty=format:'" .. fmt .. "'"
-    .. " --date=format:'" .. date .. "' | " .. pager)
+  local text, err = U.run_stdout(cwd, {
+    "log", "-10", "--color=always",
+    "--pretty=format:%C(yellow)%h%C(reset) | %C(cyan)%an%C(reset) | "
+      .. "%C(green)%ad%C(reset) | %s",
+    "--date=format:%d.%m.%y %H:%M",
+  })
+  if err then U.notify("log failed: " .. err, "error"); return end
+  U.page_text(text, "git-screen-log10.txt")
 end
 
 function C.status()
@@ -364,10 +367,10 @@ function C.diff()
   local cwd = require_repo(); if not cwd then return end
   local path = U.get_hovered()
   if not path then U.notify("no file under cursor", "warn"); return end
-  local viewer = (os.execute("command -v delta >/dev/null 2>&1") == 0)
-    and "delta" or (os.getenv("PAGER") or "less -R")
-  U.emit_shell(string.format(
-    "cd %q && git diff --color=always -- %q | %s", cwd, path, viewer))
+  local text, err = U.run_stdout(cwd, { "diff", "--color=always", "--", path })
+  if err then U.notify("diff failed: " .. err, "error"); return end
+  if text == "" then U.notify("no diff for " .. path); return end
+  U.page_text(text, "git-screen-diff.txt")
 end
 
 ----------------------------------------------------------
@@ -382,8 +385,12 @@ local function gi_path(cwd, scope)
   if scope == "local" then
     local gitdir = U.run(cwd, { "rev-parse", "--absolute-git-dir" })
     if not gitdir or gitdir == "" then return nil, root end
-    -- ensure .git/info exists (it usually does, but worktrees may differ)
-    os.execute("mkdir -p " .. string.format("%q", gitdir .. "/info") .. " 2>/dev/null")
+    -- ensure .git/info exists (works on Unix and Windows shells)
+    if package.config:sub(1, 1) == "\\" then
+      os.execute('mkdir "' .. gitdir:gsub("/", "\\") .. '\\info" 2>nul')
+    else
+      os.execute("mkdir -p " .. string.format("%q", gitdir .. "/info") .. " 2>/dev/null")
+    end
     return gitdir .. "/info/exclude", root
   end
   return root .. "/.gitignore", root
@@ -696,14 +703,10 @@ local function gitignore_list(scope)
 
   local f = io.open(gi_file, "r")
   if not f then U.notify(label .. " not found (no rules yet)", "warn"); return end
-  -- empty-file shortcut
-  local first = f:read("*l")
+  local text = f:read("*a")
   f:close()
-  if not first then U.notify(label .. " is empty", "warn"); return end
-
-  local pager = os.getenv("PAGER") or "less -R"
-  U.emit_shell("cat " .. string.format("%q", gi_file) ..
-    " | " .. pager)
+  if not text or text == "" then U.notify(label .. " is empty", "warn"); return end
+  U.page_text(text, "git-screen-gi-" .. scope .. ".txt")
 end
 
 function C.gitignore_add()      gi_add_selection(false, "repo") end
