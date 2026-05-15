@@ -88,11 +88,12 @@ directories silently refreshes the footer indicator.
 
 ### Top-level menu (`o g`)
 
-When the current directory is **not** a git repo, only one entry is shown:
+When the current directory is **not** a git repo:
 
-| Key | Action            |
-| --- | ----------------- |
-| `i` | init repo here    |
+| Key | Action                              |
+| --- | ----------------------------------- |
+| `i` | init repo here                      |
+| `c` | clone repo here (input URL)         |
 
 When inside a git repo, the full menu (with submenus) is shown below. `←`
 always returns to the parent menu.

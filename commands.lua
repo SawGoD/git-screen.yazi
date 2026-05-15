@@ -88,6 +88,44 @@ function C.init()
   U.refresh()
 end
 
+function C.clone()
+  local cwd = U.get_cwd()
+  local st = U.compute(cwd)
+  if st.is_repo then
+    U.notify("Already inside a git repo: " .. (st.branch or "?"), "warn"); return
+  end
+
+  local url, evt = U.input_fn {
+    title = "Clone — repository URL:",
+    value = "",
+    pos = { "center", w = 80 },
+  }
+  if evt ~= 1 or not url or U.trim(url) == "" then return end
+  url = U.trim(url)
+
+  -- Resolve auto-generated dir name git would use, so we can flag collisions
+  -- early. Trim .git suffix and any trailing slashes.
+  local name = url:match("([^/\\]+)/*$") or url
+  name = name:gsub("%.git$", "")
+  if name == "" or name == "." then
+    U.notify("can't derive a target dir from URL: " .. url, "error"); return
+  end
+
+  local ok, output = U.git_capture(cwd, { "clone", url })
+  U.refresh()
+  if not ok then
+    U.show_output("git clone ✗", output, "error")
+    return
+  end
+  -- count tracked files in the freshly cloned repo for a compact toast
+  local target = cwd .. "/" .. name
+  local files = U.run(target, { "ls-files" }) or ""
+  local count = 0
+  for _ in files:gmatch("[^\r\n]+") do count = count + 1 end
+  U.notify(string.format("cloned %s/  (%d file%s)",
+    name, count, count == 1 and "" or "s"))
+end
+
 ----------------------------------------------------------
 -- Branches
 ----------------------------------------------------------

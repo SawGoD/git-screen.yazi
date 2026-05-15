@@ -178,7 +178,10 @@ cmd_menu = function()
 
   local cands
   if not st.is_repo then
-    cands = { { on = "i", desc = "init repo here" } }
+    cands = {
+      { on = "i", desc = "init repo here" },
+      { on = "c", desc = "clone repo here (input URL)" },
+    }
   else
     cands = {
       { on = "b", desc = "branches menu (switch / create / delete / remote-delete)" },
@@ -198,6 +201,7 @@ cmd_menu = function()
   local key = cands[idx].on
 
   if     key == "i" and not st.is_repo then C.init()
+  elseif key == "c" and not st.is_repo then C.clone()
   elseif key == "i" then cmd_gitignore_menu()
   elseif key == "b" then cmd_branch_menu()
   elseif key == "s" then cmd_stash_menu()
@@ -227,6 +231,7 @@ function M:entry(job)
   local ok, err = pcall(function()
     if     sub == "menu"     then cmd_menu()
     elseif sub == "init"     then C.init()
+    elseif sub == "clone"    then C.clone()
     elseif sub == "branches" then cmd_branch_menu()
     elseif sub == "switch"   then C.branch_switch()
     elseif sub == "history"  then C.history()
