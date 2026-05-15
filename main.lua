@@ -100,8 +100,27 @@ local function cmd_stash_menu()
   end
 end
 
--- forward-decl so cmd_local_exclude_menu can go back to parent.
+-- forward-decl so submenus can go back to parent.
 local cmd_gitignore_menu
+
+local function cmd_gitignore_templates_menu()
+  if not C.require_repo() then return end
+  local cands = {
+    { on = "b", desc = "Basic — env / IDE / OS / logs / archives" },
+    { on = "n", desc = "Node.js — node_modules / dist / .next / coverage / …" },
+    { on = "p", desc = "Python — venv / __pycache__ / dist / pytest / mypy / …" },
+    { on = "r", desc = "Rust — target / coverage / profraw / …" },
+    { on = "g", desc = "Go — bin / dist / coverage / .test / …" },
+    { on = "<Left>", desc = "← back" },
+  }
+  local idx = U.which_fn { cands = cands }
+  if not idx then return end
+  local key = cands[idx].on
+  if key == "<Left>" then cmd_gitignore_menu(); return end
+  local names = { b = "basic", n = "node", p = "python", r = "rust", g = "go" }
+  local name = names[key]
+  if name then C.gitignore_template(name) end
+end
 
 local function cmd_local_exclude_menu()
   if not C.require_repo() then return end
@@ -133,6 +152,7 @@ cmd_gitignore_menu = function()
     { on = "p", desc = "pattern input (e.g. *.log, build/)" },
     { on = "l", desc = "list rules (in pager)" },
     { on = "r", desc = "remove rule (picker)" },
+    { on = "T", desc = "templates submenu (basic / node / python / rust / go)" },
     { on = "x", desc = "local exclude submenu (.git/info/exclude)" },
     { on = "<Left>", desc = "← back" },
   }
@@ -144,6 +164,7 @@ cmd_gitignore_menu = function()
   elseif key == "p" then C.gitignore_pattern()
   elseif key == "l" then C.gitignore_list()
   elseif key == "r" then C.gitignore_remove()
+  elseif key == "T" then cmd_gitignore_templates_menu()
   elseif key == "x" then cmd_local_exclude_menu()
   elseif key == "<Left>" then cmd_menu()
   end

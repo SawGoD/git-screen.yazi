@@ -747,6 +747,339 @@ local function gitignore_list(scope)
   U.page_text(text, "git-screen-gi-" .. scope .. ".txt")
 end
 
+----------------------------------------------------------
+-- .gitignore templates
+----------------------------------------------------------
+
+local GI_TEMPLATES = {
+  basic = [[
+# Environment
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# IDE / editors
+.vscode/
+.vs_code/
+.idea/
+*.iml
+
+# Local editor swap/temp files
+*.swp
+*.swo
+*~
+*.tmp
+*.temp
+
+# Logs
+*.log
+logs/
+
+# OS / filesystem noise
+.DS_Store
+Thumbs.db
+
+# Cache
+.cache/
+tmp/
+temp/
+
+# Archives
+*.zip
+*.tar*
+*.tgz
+*.rar
+*.7z
+
+# Local config
+*.local
+*.local.*
+]],
+  node = [[
+# Environment
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# IDE / editors
+.vscode/
+.vs_code/
+.idea/
+*.iml
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Dependencies
+node_modules/
+
+# Package manager cache / metadata
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# Build output
+dist/
+build/
+out/
+.next/
+.nuxt/
+.output/
+.vercel/
+.netlify/
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Cache
+.cache/
+.parcel-cache/
+.turbo/
+.eslintcache
+.stylelintcache
+
+# TypeScript
+*.tsbuildinfo
+
+# Runtime
+*.pid
+*.seed
+
+# Temp
+tmp/
+temp/
+*.tmp
+*.temp
+
+# OS noise
+.DS_Store
+Thumbs.db
+]],
+  python = [[
+# Environment
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# IDE / editors
+.vscode/
+.vs_code/
+.idea/
+*.iml
+
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+virtualenv/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Test / coverage
+.coverage
+.coverage.*
+coverage/
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+
+# Type checkers / linters
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Django / Flask-ish local files
+instance/
+.webassets-cache/
+local_settings.py
+
+# Logs
+*.log
+logs/
+
+# Temp
+tmp/
+temp/
+*.tmp
+*.temp
+
+# OS noise
+.DS_Store
+Thumbs.db
+]],
+  rust = [[
+# Environment
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# IDE / editors
+.vscode/
+.vs_code/
+.idea/
+*.iml
+
+# Rust build output
+target/
+
+# Rustfmt backup files
+**/*.rs.bk
+
+# Coverage / profiling
+coverage/
+tarpaulin-report.html
+*.profraw
+*.profdata
+
+# Logs
+*.log
+logs/
+
+# Temp
+tmp/
+temp/
+*.tmp
+*.temp
+
+# OS noise
+.DS_Store
+Thumbs.db
+]],
+  go = [[
+# Environment
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# IDE / editors
+.vscode/
+.vs_code/
+.idea/
+*.iml
+
+# Go binaries / build output
+bin/
+build/
+dist/
+out/
+
+# Go test binaries
+*.test
+
+# Go coverage
+coverage/
+coverage.out
+*.coverprofile
+
+# Go workspace
+go.work.sum
+
+# Logs
+*.log
+logs/
+
+# Temp
+tmp/
+temp/
+*.tmp
+*.temp
+
+# OS noise
+.DS_Store
+Thumbs.db
+]],
+}
+
+-- Append template content to .gitignore, skipping rules that already exist.
+-- Section comments / blank lines are emitted only when followed by at least
+-- one new rule, so we don't litter the file with orphaned headers.
+local function gitignore_template(scope, name)
+  local cwd = require_repo(); if not cwd then return end
+  local gi_file, _ = gi_path(cwd, scope); if not gi_file then return end
+  local label = gi_scope_label(scope)
+  local content = GI_TEMPLATES[name]
+  if not content then U.notify("unknown template: " .. name, "warn"); return end
+
+  gi_ensure_file(gi_file)
+  local existing_lines = gi_read(gi_file)
+  local existing = {}
+  for _, line in ipairs(existing_lines) do
+    local r = gi_rule_text(line)
+    if r then existing[r] = true end
+  end
+
+  local pending, appended = {}, {}
+  local new_lines = {}
+  for line in content:gmatch("[^\r\n]*") do
+    local rule = gi_rule_text(line)
+    if rule then
+      if not existing[rule] then
+        for _, c in ipairs(pending) do new_lines[#new_lines + 1] = c end
+        pending = {}
+        new_lines[#new_lines + 1] = line
+        appended[#appended + 1] = rule
+        existing[rule] = true
+      end
+    else
+      pending[#pending + 1] = line
+    end
+  end
+
+  if #appended == 0 then
+    U.notify("[" .. label .. "] `" .. name .. "`: all rules already present", "warn")
+    return
+  end
+
+  local out = {}
+  for _, l in ipairs(existing_lines) do out[#out + 1] = l end
+  if #out > 0 and U.trim(out[#out]) ~= "" then out[#out + 1] = "" end
+  out[#out + 1] = "# --- " .. name .. " (git-screen template) ---"
+  for _, l in ipairs(new_lines) do out[#out + 1] = l end
+
+  local ok, werr = gi_write(gi_file, out)
+  if not ok then U.notify("write failed: " .. werr, "error"); return end
+  U.notify(string.format("[%s] template %s: added %d rule(s)",
+    label, name, #appended))
+  U.refresh()
+end
+
+function C.gitignore_template(name) gitignore_template("repo", name) end
+
 function C.gitignore_add()      gi_add_selection(false, "repo") end
 function C.gitignore_negate()   gi_add_selection(true,  "repo") end
 function C.gitignore_pattern()  gitignore_pattern("repo") end

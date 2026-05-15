@@ -126,6 +126,7 @@ always returns to the parent menu.
 |         |                 | `p` | pattern input (e.g. `*.log`, `build/`)              |
 |         |                 | `l` | list .gitignore rules (in pager)                    |
 |         |                 | `r` | remove rule (picker)                                |
+|         |                 | `T` | open **templates** submenu (see below)              |
 |         |                 | `x` | open **local exclude** submenu (see below)          |
 |         |                 | `←` | back                                                |
 |         | `f · fetch`     |     | git fetch --all --prune (silent + refresh)          |
@@ -133,6 +134,23 @@ always returns to the parent menu.
 |         | `P · pull`      |     | auto-prompts upstream; surfaces merge conflicts     |
 |         | `d · diff`      |     | git diff of hovered file (delta or $PAGER)          |
 |         | `r · refresh`   |     | force-refresh footer indicator                      |
+
+### Templates submenu (`o g i T`)
+
+Appends a curated `.gitignore` template to the current file. Rules already
+present in the file are skipped — only missing ones are added, under a
+clearly marked `# --- <name> (git-screen template) ---` header. Section
+comments come along only when at least one rule from the section is new
+(no orphan headers).
+
+| Key | Template                                                  |
+| --- | --------------------------------------------------------- |
+| `b` | Basic — env / IDE / OS / logs / archives                  |
+| `n` | Node.js — node_modules / dist / .next / coverage / …      |
+| `p` | Python — venv / __pycache__ / dist / pytest / mypy / …    |
+| `r` | Rust — target / coverage / profraw / …                    |
+| `g` | Go — bin / dist / coverage / .test / …                    |
+| `←` | back to gitignore submenu                                 |
 
 ### Local exclude submenu (`o g i x`)
 
