@@ -36,11 +36,22 @@ end
 function M:setup()
   lazy_load()
   U.dbg("setup")
-  -- ps.sub("cd") callback runs sync (no coroutine); defer to async entry.
-  ps.sub("cd", function()
-    U.dbg("cd event -> emit refresh")
+  -- ps.sub callbacks run sync (no coroutine); defer to async entry.
+  -- `cd` covers directory changes; the file-op events cover edits made
+  -- through yazi itself (paste/delete/rename/yank) so the branch indicator
+  -- (dirty/ahead/behind) updates without manual `r`. External edits (a
+  -- saved file from $EDITOR) won't fire any of these — use `r` for those.
+  local function emit_refresh(evt)
+    U.dbg(evt, "event -> emit refresh")
     ya.emit("plugin", { "git-screen", args = "refresh" })
-  end)
+  end
+  ps.sub("cd",     function() emit_refresh("cd")     end)
+  ps.sub("delete", function() emit_refresh("delete") end)
+  ps.sub("trash",  function() emit_refresh("trash")  end)
+  ps.sub("bulk",   function() emit_refresh("bulk")   end)
+  ps.sub("move",   function() emit_refresh("move")   end)
+  ps.sub("rename", function() emit_refresh("rename") end)
+  ps.sub("yank",   function() emit_refresh("yank")   end)
 
   Status:children_add(function() return U.render_status() end, 500, Status.RIGHT)
 end
