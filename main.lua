@@ -45,7 +45,11 @@ function M:setup()
     U.dbg(evt, "event -> emit refresh")
     ya.emit("plugin", { "git-screen", args = "refresh" })
   end
-  ps.sub("cd",     function() emit_refresh("cd")     end)
+  -- `cd` also kicks a background fetch so ahead/behind stays fresh.
+  ps.sub("cd",     function()
+    U.dbg("cd event -> emit cd-refresh")
+    ya.emit("plugin", { "git-screen", args = "cd-refresh" })
+  end)
   ps.sub("delete", function() emit_refresh("delete") end)
   ps.sub("trash",  function() emit_refresh("trash")  end)
   ps.sub("bulk",   function() emit_refresh("bulk")   end)
@@ -254,9 +258,21 @@ function M:entry(job)
   local sub = job and job.args and job.args[1]
   U.dbg("entry:", sub or "<nil>")
 
-  -- no args = invoked by ps.sub("cd") emit; refresh silently
+  -- no args = invoked by ps.sub emit; refresh silently
   if not sub or sub == "" then
     U.refresh()
+    return
+  end
+
+  -- cd-refresh: immediate state update, then background fetch + recompute
+  -- so the user sees the branch instantly and ahead/behind reconciles once
+  -- the network round-trip lands.
+  if sub == "cd-refresh" then
+    local cwd = U.get_cwd()
+    U.set_state(U.compute(cwd))
+    if U.maybe_fetch(cwd) then
+      U.set_state(U.compute(cwd))
+    end
     return
   end
 

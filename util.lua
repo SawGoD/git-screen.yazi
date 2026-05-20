@@ -192,6 +192,36 @@ function U.refresh()
 end
 
 ------------------------------------------------------------
+-- Background fetch on `cd` so ahead/behind reflects remote without manual `f`.
+-- Throttle per repo root (30s) to avoid spamming when bouncing through dirs.
+-- Auth/host prompts are suppressed so fetch can't hang the coroutine.
+------------------------------------------------------------
+local _last_fetch = {}
+local FETCH_THROTTLE_SEC = 30
+
+function U.maybe_fetch(cwd)
+  local root = U.repo_root(cwd)
+  if not root then return false end
+  local now = os.time()
+  if _last_fetch[root] and (now - _last_fetch[root]) < FETCH_THROTTLE_SEC then
+    return false
+  end
+  _last_fetch[root] = now
+  U.dbg("maybe_fetch:", root)
+  -- GIT_TERMINAL_PROMPT=0 prevents git from prompting for auth on stdin,
+  -- which would hang the coroutine. SSH-side prompts rely on ssh-agent /
+  -- stored creds; if those are absent the fetch fails silently — acceptable.
+  Command("git")
+    :cwd(cwd)
+    :arg({ "fetch", "--quiet" })
+    :env("GIT_TERMINAL_PROMPT", "0")
+    :stdout(Command.PIPED)
+    :stderr(Command.PIPED)
+    :output()
+  return true
+end
+
+------------------------------------------------------------
 -- Footer render (called sync by yazi)
 ------------------------------------------------------------
 function U.render_status()
@@ -205,7 +235,8 @@ function U.render_status()
 
   local spans = {
     ui.Span(" "),
-    ui.Span(" " .. (st.branch or "?") .. " "):fg(color):bold(),
+    -- Nerd Font branch glyph (nf-pl-branch, U+E0A0).
+    ui.Span(" \238\130\160 " .. (st.branch or "?") .. " "):fg(color):bold(),
   }
   if (st.ahead or 0) > 0 then
     spans[#spans + 1] = ui.Span("↑" .. st.ahead .. " "):fg("blue")
