@@ -105,6 +105,7 @@ always returns to the parent menu.
 |         |                 | `d` | delete local branch (-d)                            |
 |         |                 | `D` | force-delete local branch (-D; unmerged)            |
 |         |                 | `r` | delete REMOTE branch (push --delete)                |
+|         |                 | `p` | prune locals whose upstream is gone (-d, safe)      |
 |         |                 | `←` | back                                                |
 |         | `s · stash`     | `s` | stash push -u (optional message)                    |
 |         |                 | `p` | pop (latest, or pick if many)                       |
