@@ -73,6 +73,7 @@ local function cmd_branch_menu()
     { on = "d", desc = "delete local branch" },
     { on = "D", desc = "force-delete local branch (unmerged)" },
     { on = "r", desc = "delete REMOTE branch (push --delete)" },
+    { on = "p", desc = "prune locals whose upstream is gone (-d, safe)" },
     { on = "<Left>", desc = "← back" },
   }
   local idx = U.which_fn { cands = cands }
@@ -83,6 +84,7 @@ local function cmd_branch_menu()
   elseif key == "d" then C.branch_delete(false)
   elseif key == "D" then C.branch_delete(true)
   elseif key == "r" then C.branch_delete_remote()
+  elseif key == "p" then C.branch_prune_gone()
   elseif key == "<Left>" then cmd_menu()
   end
 end

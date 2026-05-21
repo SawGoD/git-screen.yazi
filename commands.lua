@@ -167,6 +167,64 @@ function C.branch_delete(force)
   U.refresh()
 end
 
+-- Prune local branches whose upstream is gone (deleted on remote).
+-- Runs `fetch --all --prune` first, then deletes safely with `-d`
+-- (never `-D`). Skips the current branch. Reports per-branch results.
+function C.branch_prune_gone()
+  local cwd, st = require_repo(); if not cwd then return end
+
+  local _, fe = U.run(cwd, { "fetch", "--all", "--prune" })
+  if fe then U.notify("fetch --prune failed: " .. fe, "error"); return end
+
+  local out, err = U.run(cwd, { "branch", "-vv" })
+  if err then U.notify("branch -vv failed: " .. err, "error"); return end
+
+  local gone = {}
+  for _, line in ipairs(U.split_lines(out or "")) do
+    -- Skip current branch (prefixed with "* ").
+    if not line:match("^%*") and line:match(": gone%]") then
+      local name = line:match("^[%s%*]*(%S+)")
+      if name and name ~= st.branch then gone[#gone + 1] = name end
+    end
+  end
+
+  if #gone == 0 then
+    U.notify("no local branches with gone upstream", "info"); return
+  end
+
+  local preview = table.concat(gone, ", ")
+  if #preview > 200 then preview = preview:sub(1, 197) .. "..." end
+  local cands = {
+    { on = "y", desc = string.format("yes — delete %d branch%s: %s",
+        #gone, #gone == 1 and "" or "es", preview) },
+    { on = "<Left>", desc = "← cancel" },
+  }
+  local idx = U.which_fn { cands = cands }
+  if not idx or cands[idx].on ~= "y" then return end
+
+  local deleted, failed = {}, {}
+  for _, name in ipairs(gone) do
+    local _, ce = U.run(cwd, { "branch", "-d", name })
+    if ce then failed[#failed + 1] = name .. " (" .. U.trim(ce) .. ")"
+    else        deleted[#deleted + 1] = name end
+  end
+
+  local lines = {}
+  if #deleted > 0 then
+    lines[#lines + 1] = "Deleted (" .. #deleted .. "):"
+    for _, n in ipairs(deleted) do lines[#lines + 1] = "  " .. n end
+  end
+  if #failed > 0 then
+    lines[#lines + 1] = "Failed (" .. #failed .. ", likely unmerged — use `o g b D`):"
+    for _, n in ipairs(failed) do lines[#lines + 1] = "  " .. n end
+  end
+  U.show_output(
+    string.format("prune gone: %d ok, %d failed", #deleted, #failed),
+    table.concat(lines, "\n"),
+    #failed > 0 and "warn" or "info")
+  U.refresh()
+end
+
 function C.branch_delete_remote()
   local cwd, st = require_repo(); if not cwd then return end
   local target = pick_branch(cwd, st, "remote", "delete remote")
