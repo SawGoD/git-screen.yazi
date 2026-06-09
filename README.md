@@ -36,7 +36,7 @@ No Lua dependencies — pure plugin code.
 ### 1. Drop the plugin into yazi's plugin dir
 
 ```bash
-git clone <this-repo> ~/.config/yazi/plugins/git-screen.yazi
+git clone https://github.com/SawGoD/git-screen.yazi.git ~/.config/yazi/plugins/git-screen.yazi
 # OR copy the folder manually so the layout is:
 #   ~/.config/yazi/plugins/git-screen.yazi/main.lua
 ```
