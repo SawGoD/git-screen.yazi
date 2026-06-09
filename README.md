@@ -152,6 +152,7 @@ same template twice leaves the file unchanged.
 | `p` | Python — venv / __pycache__ / dist / pytest / mypy / …    |
 | `r` | Rust — target / coverage / profraw / …                    |
 | `g` | Go — bin / dist / coverage / .test / …                    |
+| `a` | AI — Claude / Codex / Gemini / Cursor / Aider / Continue / Copilot / … |
 | `←` | back to gitignore submenu                                 |
 
 ### Local exclude submenu (`o g i x`)

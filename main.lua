@@ -128,13 +128,14 @@ local function cmd_gitignore_templates_menu()
     { on = "p", desc = "Python — venv / __pycache__ / dist / pytest / mypy / …" },
     { on = "r", desc = "Rust — target / coverage / profraw / …" },
     { on = "g", desc = "Go — bin / dist / coverage / .test / …" },
+    { on = "a", desc = "AI — Claude / Codex / Gemini / Cursor / Aider / …" },
     { on = "<Left>", desc = "← back" },
   }
   local idx = U.which_fn { cands = cands }
   if not idx then return end
   local key = cands[idx].on
   if key == "<Left>" then cmd_gitignore_menu(); return end
-  local names = { b = "basic", n = "node", p = "python", r = "rust", g = "go" }
+  local names = { b = "basic", n = "node", p = "python", r = "rust", g = "go", a = "ai" }
   local name = names[key]
   if name then C.gitignore_template(name) end
 end
@@ -169,7 +170,7 @@ cmd_gitignore_menu = function()
     { on = "p", desc = "pattern input (e.g. *.log, build/)" },
     { on = "l", desc = "list rules (in pager)" },
     { on = "r", desc = "remove rule (picker)" },
-    { on = "T", desc = "templates submenu (basic / node / python / rust / go)" },
+    { on = "T", desc = "templates submenu (basic / node / python / rust / go / ai)" },
     { on = "x", desc = "local exclude submenu (.git/info/exclude)" },
     { on = "<Left>", desc = "← back" },
   }

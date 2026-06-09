@@ -1081,6 +1081,65 @@ temp/
 .DS_Store
 Thumbs.db
 ]],
+  ai = [[
+# AI assistants — agent instructions / memory / configs
+# Project-local files written by Claude Code, Codex, Gemini CLI, Cursor,
+# Aider, Continue, etc. Keep them out of shared history by default.
+
+# Claude Code
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.claudeignore
+
+# Generic AGENTS.md convention (Codex, OpenAI agents, several others)
+AGENTS.md
+AGENTS.local.md
+.agents/
+
+# OpenAI Codex CLI
+.codex/
+.codexignore
+
+# Google Gemini CLI / Code Assist
+GEMINI.md
+.gemini/
+.aistudio/
+
+# Cursor
+.cursor/
+.cursorrules
+.cursorignore
+.cursorindexingignore
+
+# Windsurf / Codeium
+.windsurf/
+.windsurfrules
+.codeium/
+
+# Aider
+.aider*
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v*/
+
+# Continue.dev
+.continue/
+
+# Cline / Roo Code
+.cline/
+.clinerules
+.roo/
+
+# GitHub Copilot (workspace-level instruction files)
+.github/copilot-instructions.md
+.copilotignore
+
+# Generic AI scratch
+.ai/
+.llm/
+.prompts/
+]],
 }
 
 -- Split string into lines, preserving blanks (unlike U.split_lines).
