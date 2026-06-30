@@ -68,6 +68,16 @@ field, ready to edit or accept. The command is whatever you use locally — set
 it to your own wrapper since these differ per machine. If `ai_commit_cmd` is
 unset or the command returns nothing, the field just opens blank as before.
 
+The command runs in an **interactive** shell (`$SHELL -ic`), so a shell
+**alias** or function from your `.bashrc` / `.zshrc` works directly — you do
+*not* need a script on `PATH`:
+
+```lua
+require("git-screen"):setup {
+  ai_commit_cmd = "oll-msg",  -- can be an alias defined in your shell rc
+}
+```
+
 > Note: the first call to a local model can take a few seconds to warm up —
 > a "Generating commit message…" toast shows while it runs.
 
