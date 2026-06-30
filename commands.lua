@@ -400,7 +400,7 @@ function C.commit_all()
 
   local msg, evt = U.input_fn {
     title = "Commit ALL (add -A) — message:",
-    value = U.ai_commit_msg(cwd),
+    value = U.ai_commit_msg(cwd, U.scoped_diff(cwd, nil)),
     pos = { "center", w = 60 },
   }
   if evt ~= 1 or not msg or U.trim(msg) == "" then return end
@@ -422,7 +422,7 @@ function C.commit_selected()
 
   local msg, evt = U.input_fn {
     title = string.format("Commit %d file(s) — message:", #files),
-    value = U.ai_commit_msg(cwd),
+    value = U.ai_commit_msg(cwd, U.scoped_diff(cwd, files)),
     pos = { "center", w = 60 },
   }
   if evt ~= 1 or not msg or U.trim(msg) == "" then return end

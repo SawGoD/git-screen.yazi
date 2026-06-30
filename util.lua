@@ -387,19 +387,64 @@ end
 ------------------------------------------------------------
 local AI_MARK = "@@git-screen-msg@@"
 
-function U.ai_commit_msg(cwd)
+-- Diff of exactly what will be committed, so an AI message matches the commit.
+-- `files` = list of abs paths to scope to (commit-selected), or nil for the
+-- whole tree (commit-all). Includes tracked changes vs HEAD plus untracked
+-- files in scope (rendered as additions via `diff --no-index`), so brand-new
+-- files still inform the message.
+function U.scoped_diff(cwd, files)
+  local parts = {}
+
+  local dargs = { "diff", "HEAD", "--no-color" }
+  if files and #files > 0 then
+    dargs[#dargs + 1] = "--"
+    for _, f in ipairs(files) do dargs[#dargs + 1] = f end
+  end
+  local tracked = U.run(cwd, dargs)
+  if tracked and tracked ~= "" then parts[#parts + 1] = tracked end
+
+  local largs = { "ls-files", "--others", "--exclude-standard" }
+  if files and #files > 0 then
+    largs[#largs + 1] = "--"
+    for _, f in ipairs(files) do largs[#largs + 1] = f end
+  end
+  local others = U.run(cwd, largs)
+  if others and others ~= "" then
+    local nul = IS_WINDOWS and "NUL" or "/dev/null"
+    for _, rel in ipairs(U.split_lines(others)) do
+      -- --no-index exits 1 when files differ; git_capture ignores status.
+      local _, d = U.git_capture(cwd, { "diff", "--no-color", "--no-index", "--", nul, rel })
+      if d and d ~= "" then parts[#parts + 1] = d end
+    end
+  end
+
+  return table.concat(parts, "\n")
+end
+
+function U.ai_commit_msg(cwd, diff)
   local cfg = U.get_config()
   local cmd = cfg.ai_commit_cmd
   if not cmd or U.trim(cmd) == "" then return "" end
 
   U.notify("Generating commit message…")
+
+  -- Feed the scoped diff to the command on stdin via a temp file, so the
+  -- configured command reads *our* diff (the committed scope) instead of
+  -- running its own repo-wide `git diff`. The command should consume stdin,
+  -- e.g. `ollama run <model>`.
+  local redir = ""
+  if diff and diff ~= "" then
+    local p = U.write_tmp(diff, "git-screen-diff.txt")
+    if p then redir = " < " .. string.format("%q", p) end
+  end
+
   local shell, flag, wrapped
   if IS_WINDOWS then
     -- cmd /c is non-interactive: no rc noise, so no marker needed.
-    shell, flag, wrapped = (os.getenv("COMSPEC") or "cmd"), "/c", cmd
+    shell, flag, wrapped = (os.getenv("COMSPEC") or "cmd"), "/c", cmd .. redir
   else
     shell, flag = (os.getenv("SHELL") or "sh"), "-ic"
-    wrapped = "printf '\\n%s\\n' " .. AI_MARK .. "; " .. cmd
+    wrapped = "printf '\\n%s\\n' " .. AI_MARK .. "; " .. cmd .. redir
   end
 
   local out = Command(shell)
