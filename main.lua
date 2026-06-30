@@ -33,9 +33,11 @@ end
 ------------------------------------------------------------
 -- Setup (sync; runs from init.lua)
 ------------------------------------------------------------
-function M:setup()
+function M:setup(opts)
   lazy_load()
   U.dbg("setup")
+  -- Stash user config (e.g. ai_commit_cmd) for async commands to read later.
+  U.set_config(opts or {})
   -- ps.sub callbacks run sync (no coroutine); defer to async entry.
   -- `cd` covers directory changes; the file-op events cover edits made
   -- through yazi itself (paste/delete/rename/yank) so the branch indicator

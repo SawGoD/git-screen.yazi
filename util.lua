@@ -35,6 +35,17 @@ U.get_state = ya.sync(function(st)
   return st.git or {}
 end)
 
+-- Plugin config from setup(opts). Stored in the same ya.sync upvalue as state
+-- because setup() runs sync while commands run async — a plain module upvalue
+-- wouldn't survive that boundary.
+U.set_config = ya.sync(function(st, cfg)
+  st.cfg = cfg or {}
+end)
+
+U.get_config = ya.sync(function(st)
+  return st.cfg or {}
+end)
+
 U.get_cwd = ya.sync(function()
   return tostring(cx.active.current.cwd)
 end)
@@ -354,6 +365,41 @@ function U.ensure_remote(cwd)
   if re then U.notify("remote add failed: " .. re, "error"); return nil end
   U.notify("added origin: " .. U.trim(url))
   return "origin"
+end
+
+------------------------------------------------------------
+-- AI commit message: run a user-configured command and return its stdout,
+-- used to pre-fill the commit message input. The command is whatever the
+-- user wires up via setup{ ai_commit_cmd = "..." } (e.g. a local LLM like
+-- `oll-msg`). Run through a login shell so PATH / shell functions resolve as
+-- they would interactively. First run of a local model can be slow, so we
+-- notify before blocking. Any failure (no command, non-zero exit, empty
+-- output) returns "" so the input simply opens blank.
+------------------------------------------------------------
+function U.ai_commit_msg(cwd)
+  local cfg = U.get_config()
+  local cmd = cfg.ai_commit_cmd
+  if not cmd or U.trim(cmd) == "" then return "" end
+
+  U.notify("Generating commit message…")
+  local shell, flag
+  if IS_WINDOWS then
+    shell, flag = (os.getenv("COMSPEC") or "cmd"), "/c"
+  else
+    shell, flag = (os.getenv("SHELL") or "sh"), "-lc"
+  end
+
+  local out = Command(shell)
+    :cwd(cwd)
+    :arg({ flag, cmd })
+    :stdout(Command.PIPED)
+    :stderr(Command.PIPED)
+    :output()
+  if not out or not out.status or not out.status.success then
+    U.dbg("ai_commit_msg: command failed")
+    return ""
+  end
+  return U.trim(out.stdout or "")
 end
 
 return U
