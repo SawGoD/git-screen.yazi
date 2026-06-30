@@ -51,6 +51,26 @@ require("git-screen"):setup()
 
 This is what attaches the footer indicator and subscribes to `cd` events.
 
+#### AI commit messages (optional)
+
+Pass `ai_commit_cmd` to have the commit message input pre-filled by a local
+AI model (or any command that prints a commit message to stdout):
+
+```lua
+require("git-screen"):setup {
+  ai_commit_cmd = "oll-msg",
+}
+```
+
+When you trigger **commit** (`o g c c` / `o g c C`), the plugin runs this
+command in the repo directory and drops its stdout straight into the message
+field, ready to edit or accept. The command is whatever you use locally — set
+it to your own wrapper since these differ per machine. If `ai_commit_cmd` is
+unset or the command returns nothing, the field just opens blank as before.
+
+> Note: the first call to a local model can take a few seconds to warm up —
+> a "Generating commit message…" toast shows while it runs.
+
 ### 3. Wire the hotkey in `keymap.toml`
 
 Add one binding under `[mgr] prepend_keymap` in `~/.config/yazi/keymap.toml`:
