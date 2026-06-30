@@ -371,10 +371,13 @@ end
 -- AI commit message: run a user-configured command and return its stdout,
 -- used to pre-fill the commit message input. The command is whatever the
 -- user wires up via setup{ ai_commit_cmd = "..." } (e.g. a local LLM like
--- `oll-msg`). Run through a login shell so PATH / shell functions resolve as
--- they would interactively. First run of a local model can be slow, so we
--- notify before blocking. Any failure (no command, non-zero exit, empty
--- output) returns "" so the input simply opens blank.
+-- `oll-msg`). Run through an INTERACTIVE shell (`-ic`) so shell aliases and
+-- functions defined in the user's rc file resolve — a common case, since the
+-- command is often an alias that never lives on PATH. `-c` runs the string
+-- and exits; we only read stdout, so the shell's interactive chatter on
+-- stderr is harmless. First run of a local model can be slow, so we notify
+-- before blocking. Any failure (no command, non-zero exit, empty output)
+-- returns "" so the input simply opens blank.
 ------------------------------------------------------------
 function U.ai_commit_msg(cwd)
   local cfg = U.get_config()
@@ -386,12 +389,13 @@ function U.ai_commit_msg(cwd)
   if IS_WINDOWS then
     shell, flag = (os.getenv("COMSPEC") or "cmd"), "/c"
   else
-    shell, flag = (os.getenv("SHELL") or "sh"), "-lc"
+    shell, flag = (os.getenv("SHELL") or "sh"), "-ic"
   end
 
   local out = Command(shell)
     :cwd(cwd)
     :arg({ flag, cmd })
+    :stdin(Command.NULL)
     :stdout(Command.PIPED)
     :stderr(Command.PIPED)
     :output()
