@@ -54,29 +54,33 @@ This is what attaches the footer indicator and subscribes to `cd` events.
 #### AI commit messages (optional)
 
 Pass `ai_commit_cmd` to have the commit message input pre-filled by a local
-AI model (or any command that prints a commit message to stdout):
+AI model. The command **reads the diff on stdin** and prints a commit message
+to stdout:
 
 ```lua
 require("git-screen"):setup {
-  ai_commit_cmd = "oll-msg",
+  ai_commit_cmd = "ollama run qwen-msg",  -- reads diff from stdin
 }
 ```
 
-When you trigger **commit** (`o g c c` / `o g c C`), the plugin runs this
-command in the repo directory and drops its stdout straight into the message
-field, ready to edit or accept. The command is whatever you use locally — set
-it to your own wrapper since these differ per machine. If `ai_commit_cmd` is
-unset or the command returns nothing, the field just opens blank as before.
+When you trigger **commit** (`o g c c` / `o g c C`), the plugin computes the
+diff of *exactly what will be committed* — the selected/hovered files for
+`o g c c`, the whole tree for `o g c C` — and pipes it into the command on
+stdin. Its stdout drops straight into the message field, ready to edit or
+accept.
+
+> **Important:** let the plugin produce the diff — don't run `git diff`
+> inside your command. A command like `git diff | ollama run …` would describe
+> the *whole repo* instead of just the files you're committing. Configure the
+> bare model call (`ollama run qwen-msg`) and it receives the correctly-scoped
+> diff on stdin.
+
+If `ai_commit_cmd` is unset or the command returns nothing, the field just
+opens blank as before.
 
 The command runs in an **interactive** shell (`$SHELL -ic`), so a shell
 **alias** or function from your `.bashrc` / `.zshrc` works directly — you do
-*not* need a script on `PATH`:
-
-```lua
-require("git-screen"):setup {
-  ai_commit_cmd = "oll-msg",  -- can be an alias defined in your shell rc
-}
-```
+*not* need a script on `PATH`.
 
 > Note: the first call to a local model can take a few seconds to warm up —
 > a "Generating commit message…" toast shows while it runs.
