@@ -82,6 +82,24 @@ The command runs in an **interactive** shell (`$SHELL -ic`), so a shell
 **alias** or function from your `.bashrc` / `.zshrc` works directly — you do
 *not* need a script on `PATH`.
 
+#### Custom instructions (optional)
+
+If your model doesn't already know the task (a raw model with no system
+prompt), add `ai_commit_prompt` — it's prepended to the diff on stdin:
+
+```lua
+require("git-screen"):setup {
+  ai_commit_cmd = "ollama run llama3",
+  ai_commit_prompt = "Write one Conventional Commits line for this diff. "
+    .. "Reply with the message only:",
+}
+```
+
+It's off by default, since prompt text is language- and backend-specific and
+many setups (e.g. an Ollama `Modelfile` with a baked-in `SYSTEM` prompt)
+already carry their own instructions — leave it unset there. Want the prompt
+in a file? Read it yourself: `ai_commit_prompt = io.open(path):read("a")`.
+
 > Note: the first call to a local model can take a few seconds to warm up —
 > a "Generating commit message…" toast shows while it runs.
 

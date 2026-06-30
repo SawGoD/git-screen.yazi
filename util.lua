@@ -428,13 +428,24 @@ function U.ai_commit_msg(cwd, diff)
 
   U.notify("Generating commit message…")
 
-  -- Feed the scoped diff to the command on stdin via a temp file, so the
+  -- Optional instructions prepended to the diff. Off by default: prompt text
+  -- is language/backend-specific, and many models (e.g. an Ollama Modelfile
+  -- with a baked-in SYSTEM prompt) already know the task — extra instructions
+  -- would only get in the way. Users who need it set ai_commit_prompt to their
+  -- own string (read from a file in init.lua if they prefer).
+  local prompt = cfg.ai_commit_prompt
+  local payload = diff or ""
+  if prompt and U.trim(prompt) ~= "" then
+    payload = U.trim(prompt) .. "\n\n" .. payload
+  end
+
+  -- Feed the payload to the command on stdin via a temp file, so the
   -- configured command reads *our* diff (the committed scope) instead of
   -- running its own repo-wide `git diff`. The command should consume stdin,
   -- e.g. `ollama run <model>`.
   local redir = ""
-  if diff and diff ~= "" then
-    local p = U.write_tmp(diff, "git-screen-diff.txt")
+  if payload ~= "" then
+    local p = U.write_tmp(payload, "git-screen-diff.txt")
     if p then redir = " < " .. string.format("%q", p) end
   end
 
