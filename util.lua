@@ -373,28 +373,38 @@ end
 -- user wires up via setup{ ai_commit_cmd = "..." } (e.g. a local LLM like
 -- `oll-msg`). Run through an INTERACTIVE shell (`-ic`) so shell aliases and
 -- functions defined in the user's rc file resolve — a common case, since the
--- command is often an alias that never lives on PATH. `-c` runs the string
--- and exits; we only read stdout, so the shell's interactive chatter on
--- stderr is harmless. First run of a local model can be slow, so we notify
--- before blocking. Any failure (no command, non-zero exit, empty output)
--- returns "" so the input simply opens blank.
+-- command is often an alias that never lives on PATH.
+--
+-- An interactive shell sources the user's rc file, which often prints to
+-- stdout (prompt theme, greeting, plugin banners) BEFORE our command runs.
+-- To strip that, we echo a unique marker right before the command and keep
+-- only what follows the LAST marker — i.e. the command's own output. The
+-- marker line itself, and everything before it, is discarded.
+--
+-- First run of a local model can be slow, so we notify before blocking. Any
+-- failure (no command, non-zero exit, empty output) returns "" so the input
+-- simply opens blank.
 ------------------------------------------------------------
+local AI_MARK = "@@git-screen-msg@@"
+
 function U.ai_commit_msg(cwd)
   local cfg = U.get_config()
   local cmd = cfg.ai_commit_cmd
   if not cmd or U.trim(cmd) == "" then return "" end
 
   U.notify("Generating commit message…")
-  local shell, flag
+  local shell, flag, wrapped
   if IS_WINDOWS then
-    shell, flag = (os.getenv("COMSPEC") or "cmd"), "/c"
+    -- cmd /c is non-interactive: no rc noise, so no marker needed.
+    shell, flag, wrapped = (os.getenv("COMSPEC") or "cmd"), "/c", cmd
   else
     shell, flag = (os.getenv("SHELL") or "sh"), "-ic"
+    wrapped = "printf '\\n%s\\n' " .. AI_MARK .. "; " .. cmd
   end
 
   local out = Command(shell)
     :cwd(cwd)
-    :arg({ flag, cmd })
+    :arg({ flag, wrapped })
     :stdin(Command.NULL)
     :stdout(Command.PIPED)
     :stderr(Command.PIPED)
@@ -403,7 +413,17 @@ function U.ai_commit_msg(cwd)
     U.dbg("ai_commit_msg: command failed")
     return ""
   end
-  return U.trim(out.stdout or "")
+
+  local raw = out.stdout or ""
+  -- Keep only text after the last marker (the rc banner can't contain it).
+  local tail, pos = nil, 1
+  while true do
+    local i = raw:find(AI_MARK, pos, true)
+    if not i then break end
+    tail = raw:sub(i + #AI_MARK)
+    pos = i + 1
+  end
+  return U.trim(tail or raw)
 end
 
 return U
