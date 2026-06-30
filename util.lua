@@ -387,6 +387,61 @@ end
 ------------------------------------------------------------
 local AI_MARK = "@@git-screen-msg@@"
 
+-- Replay terminal control codes to the final text a terminal would show.
+-- Tools like `ollama run` stream their answer with cursor moves and line
+-- erases (word-wrap redraw), e.g. `…ai_com\27[6D\27[K  ai_commit_msg`. Naively
+-- stripping the escapes would leave the overwritten fragment behind, so we
+-- emulate a single line: write at a cursor, honour CR / BS / ESC[<n>D / ESC[K.
+-- UTF-8 aware — cursor moves count characters, not bytes (Cyrillic is 2 bytes).
+function U.render_tty(s)
+  s = s or ""
+  local line, len, cur = {}, 0, 1
+  local out = {}
+  local function flush()
+    local t = {}
+    for j = 1, len do t[j] = line[j] or " " end
+    out[#out + 1] = table.concat(t)
+    line, len, cur = {}, 0, 1
+  end
+  local i, n = 1, #s
+  while i <= n do
+    local byte = s:byte(i)
+    if byte == 27 then -- ESC
+      if s:sub(i + 1, i + 1) == "[" then
+        local params, final, after = s:match("^\27%[([%d;?]*)(%a)()", i)
+        if final then
+          if final == "D" then cur = math.max(1, cur - (tonumber(params) or 1))
+          elseif final == "C" then cur = cur + (tonumber(params) or 1)
+          elseif final == "K" then
+            for j = cur, len do line[j] = nil end
+            len = math.min(len, cur - 1)
+          end
+          i = after
+        else
+          i = i + 2 -- malformed CSI; drop ESC[
+        end
+      else
+        i = i + 2 -- other ESC sequence (OSC/charset); drop ESC + next
+      end
+    elseif byte == 13 then cur = 1; i = i + 1            -- CR
+    elseif byte == 8 then cur = math.max(1, cur - 1); i = i + 1 -- BS
+    elseif byte == 10 then flush(); i = i + 1            -- LF
+    elseif byte < 32 or byte == 127 then i = i + 1       -- drop other control
+    else
+      local clen = 1
+      if byte >= 240 then clen = 4
+      elseif byte >= 224 then clen = 3
+      elseif byte >= 192 then clen = 2 end
+      line[cur] = s:sub(i, i + clen - 1)
+      if cur > len then len = cur end
+      cur = cur + 1
+      i = i + clen
+    end
+  end
+  flush()
+  return table.concat(out, "\n")
+end
+
 -- Diff of exactly what will be committed, so an AI message matches the commit.
 -- `files` = list of abs paths to scope to (commit-selected), or nil for the
 -- whole tree (commit-all). Includes tracked changes vs HEAD plus untracked
@@ -479,7 +534,15 @@ function U.ai_commit_msg(cwd, diff)
     tail = raw:sub(i + #AI_MARK)
     pos = i + 1
   end
-  return U.trim(tail or raw)
+
+  -- Replay any streamed control codes, then take the first non-empty line:
+  -- a commit subject is a single line, and the input field is single-line.
+  local rendered = U.render_tty(tail or raw)
+  for _, ln in ipairs(U.split_lines(rendered)) do
+    local t = U.trim(ln)
+    if t ~= "" then return t end
+  end
+  return ""
 end
 
 return U
