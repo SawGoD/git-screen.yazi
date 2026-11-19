@@ -78,6 +78,33 @@ accept.
 If `ai_commit_cmd` is unset or the command returns nothing, the field just
 opens blank as before.
 
+#### OpenAI-compatible HTTP API
+
+Alternatively, configure a Chat Completions endpoint directly. This requires
+`curl` and `jq`. For DeepSeek, export `DEEPSEEK_API_KEY` in the environment
+before starting yazi, and configure:
+
+```lua
+require("git-screen"):setup {
+  ai_commit_api = {
+    url = "https://api.deepseek.com/chat/completions",
+    model = "deepseek-flash",
+    api_key_env = "DEEPSEEK_API_KEY",
+  },
+  -- Optional: overrides the default commit-message instruction.
+  -- ai_commit_prompt = "Write a short commit subject. Return only the subject.",
+}
+```
+
+Use the full HTTPS Chat Completions URL, model name, and API key environment
+variable for another OpenAI-compatible provider. If both `ai_commit_api` and
+`ai_commit_cmd` are configured, the API takes precedence. The selected diff
+and the two latest commit subjects are sent to the provider; API usage may
+incur charges. The response is offered
+for review in the commit message field. On failure the field opens empty and
+an error notification is shown. The default system instruction is in
+`commit-prompt.lua`; `ai_commit_prompt` overrides it.
+
 The command runs in an **interactive** shell (`$SHELL -ic`), so a shell
 **alias** or function from your `.bashrc` / `.zshrc` works directly — you do
 *not* need a script on `PATH`.
@@ -260,6 +287,7 @@ A few paths/patterns are hard-blocked from `.gitignore` and
 ~/.config/yazi/plugins/git-screen.yazi/
 ├── main.lua        setup, entry router, menus (top + 5 submenus)
 ├── util.lua        state, helpers, footer renderer, ensure_remote
+├── commit-prompt.lua default API commit message instruction
 ├── commands.lua    all git operations (init / branches / stash / commit / gitignore / sync)
 └── README.md       this file
 ```
