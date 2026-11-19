@@ -26,12 +26,15 @@ lightweight git client:
 | `yazi`        | **≥ 26.1**      | Uses `ui.render`, `pos = ...`, `ps.sub` APIs.      |
 | `git`         | **required**    | Any modern version (≥ 2.30 recommended).           |
 | `less`        | recommended     | Used for the commit graph / `log -10` viewer. Any `$PAGER` works. |
-| `delta`       | optional        | If present, `o g d` uses it for prettier diffs; otherwise falls back to `$PAGER`. |
+| `delta`       | optional        | Can be configured as `$PAGER` for viewing diffs and history. |
 | `bash`        | required        | The history / push / pull viewers shell out via `bash`. |
+| `curl`, `jq`  | optional        | Required for OpenAI-compatible HTTP API commit messages. |
 
 No Lua dependencies — pure plugin code.
 
-## Screenshots
+<details>
+<summary>Screenshots</summary>
+
 
 Open the Git menu with `o g`:
 
@@ -50,6 +53,8 @@ View the commit graph with `o g c h`:
 
 ![Commit history graph](docs/screenshots/commit-history.png)
 
+</details>
+
 ## Installation
 
 ### 1. Drop the plugin into yazi's plugin dir
@@ -62,7 +67,9 @@ git clone https://github.com/SawGoD/git-screen.yazi.git ~/.config/yazi/plugins/g
 
 ### 2. Load the plugin from `init.lua`
 
-Add the following line to `~/.config/yazi/init.lua` (create it if missing):
+Add the following line to `~/.config/yazi/init.lua` (create it if missing).
+When configuring AI below, replace this call with the configured one; call
+`setup` only once:
 
 ```lua
 require("git-screen"):setup()
@@ -82,11 +89,16 @@ require("git-screen"):setup {
 }
 ```
 
-When you trigger **commit** (`o g c c` / `o g c C`), the plugin computes the
-diff of *exactly what will be committed* — the selected/hovered files for
-`o g c c`, the whole tree for `o g c C` — and pipes it into the command on
-stdin. Its stdout drops straight into the message field, ready to edit or
-accept.
+When you trigger **commit** (`o g c c` / `o g c C`), the plugin prepares a
+diff scoped to the selected/hovered files or the whole tree, respectively,
+including untracked files. It passes this diff on stdin and uses the first
+nonempty output line to pre-fill the message field.
+
+For a selected-file commit, Git also commits any changes that were already
+staged outside the selection; those changes are not included in the selected
+diff sent to the model. Review the index and generated message before
+confirming. In a repository without an initial commit, tracked changes are not
+included in the generated diff because there is no `HEAD` to compare against.
 
 > **Important:** let the plugin produce the diff — don't run `git diff`
 > inside your command. A command like `git diff | ollama run …` would describe
@@ -94,8 +106,12 @@ accept.
 > bare model call (`ollama run qwen-msg`) and it receives the correctly-scoped
 > diff on stdin.
 
-If `ai_commit_cmd` is unset or the command returns nothing, the field just
-opens blank as before.
+If neither an API nor a command is configured, or the configured command
+returns nothing, the field opens blank.
+
+On Unix-like systems the command runs in an **interactive** shell (`$SHELL
+-ic`), so aliases and functions from your shell's startup files can be used.
+On Windows it runs through `cmd /c` instead.
 
 #### OpenAI-compatible HTTP API
 
@@ -119,14 +135,10 @@ Use the full HTTPS Chat Completions URL, model name, and API key environment
 variable for another OpenAI-compatible provider. If both `ai_commit_api` and
 `ai_commit_cmd` are configured, the API takes precedence. The selected diff
 and the two latest commit subjects are sent to the provider; API usage may
-incur charges. The response is offered
-for review in the commit message field. On failure the field opens empty and
+incur charges. The response is offered for review in the commit message field.
+On failure the field opens empty and
 an error notification is shown. The default system instruction is in
 `commit-prompt.lua`; `ai_commit_prompt` overrides it.
-
-The command runs in an **interactive** shell (`$SHELL -ic`), so a shell
-**alias** or function from your `.bashrc` / `.zshrc` works directly — you do
-*not* need a script on `PATH`.
 
 #### Custom instructions (optional)
 
@@ -141,9 +153,10 @@ require("git-screen"):setup {
 }
 ```
 
-It's off by default, since prompt text is language- and backend-specific and
+For `ai_commit_cmd`, it's off by default, since prompt text is backend-specific and
 many setups (e.g. an Ollama `Modelfile` with a baked-in `SYSTEM` prompt)
-already carry their own instructions — leave it unset there. Want the prompt
+already carry their own instructions — leave it unset there. For the HTTP API,
+the configured prompt replaces the default system instruction. Want the prompt
 in a file? Read it yourself: `ai_commit_prompt = io.open(path):read("a")`.
 
 > Note: the first call to a local model can take a few seconds to warm up —
@@ -228,10 +241,10 @@ always returns to the parent menu.
 |         |                 | `T` | open **templates** submenu (see below)              |
 |         |                 | `x` | open **local exclude** submenu (see below)          |
 |         |                 | `←` | back                                                |
-|         | `f · fetch`     |     | git fetch --all --prune (silent + refresh)          |
+|         | `f · fetch`     |     | git fetch --all --prune, notify and refresh         |
 |         | `p · push`      |     | auto-prompts remote/upstream; handles rejected push |
 |         | `P · pull`      |     | auto-prompts upstream; surfaces merge conflicts     |
-|         | `d · diff`      |     | git diff of hovered file (delta or $PAGER)          |
+|         | `d · diff`      |     | git diff of hovered file (in pager)                 |
 |         | `r · refresh`   |     | force-refresh footer indicator                      |
 
 ### Templates submenu (`o g i T`)
@@ -296,7 +309,7 @@ A few paths/patterns are hard-blocked from `.gitignore` and
   plugin writes a line per invocation/event.
 - **`o g c l` shows file paths instead of commit data.** Yazi expands
   `%`-placeholders in shell commands; if you fork the plugin, escape `%` with
-  `%%` (see the `sh_pct` helper in `main.lua`).
+  `%%` (see the `sh_pct` helper in `util.lua`).
 - **`attempt to yield from outside a coroutine`.** Don't add `--- @sync entry`
   to the plugin — `Command:output()` requires running in a coroutine.
 
@@ -312,8 +325,9 @@ A few paths/patterns are hard-blocked from `.gitignore` and
 ```
 
 `main.lua` is the entry point yazi loads via `require("git-screen"):setup()`.
-It pulls in the other two via `require("git-screen.util")` and
-`require("git-screen.commands")`. Yazi's plugin loader maps dotted module
+It pulls in helpers via `require("git-screen.util")` and
+`require("git-screen.commands")`; the API also loads `commit-prompt.lua`.
+Yazi's plugin loader maps dotted module
 names to sibling files inside the plugin directory.
 
 Both `util.lua` and `commands.lua` return plain tables — **not factories.**
