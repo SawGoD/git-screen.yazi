@@ -31,6 +31,25 @@ lightweight git client:
 
 No Lua dependencies — pure plugin code.
 
+## Screenshots
+
+Open the Git menu with `o g`:
+
+![Git menu in Yazi](docs/screenshots/git-menu.png)
+
+Choose `c` to open the commit menu:
+
+![Commit menu in Yazi](docs/screenshots/commit-menu.png)
+
+When AI commit messages are configured, the generated subject is placed in
+the input field for review before committing:
+
+![Generated commit message in the input field](docs/screenshots/ai-commit-message.png)
+
+View the commit graph with `o g c h`:
+
+![Commit history graph](docs/screenshots/commit-history.png)
+
 ## Installation
 
 ### 1. Drop the plugin into yazi's plugin dir
