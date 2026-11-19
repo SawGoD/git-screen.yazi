@@ -476,8 +476,73 @@ function U.scoped_diff(cwd, files)
   return table.concat(parts, "\n")
 end
 
+-- Send stdin to a child without placing diffs or credentials in arguments.
+local function pipe_command(name, args, input, cwd)
+  local child = Command(name):cwd(cwd):arg(args):stdin(Command.PIPED)
+    :stdout(Command.PIPED):stderr(Command.PIPED):spawn()
+  if not child then return nil, "could not start " .. name end
+  local ok = child:write_all(input)
+  if not ok then child:start_kill(); child:wait(); return nil, "could not send input to " .. name end
+  ok = child:flush()
+  if not ok then child:start_kill(); child:wait(); return nil, "could not flush input to " .. name end
+  local out = child:wait_with_output()
+  if not out or not out.status then return nil, name .. " failed" end
+  if not out.status.success then
+    local stderr = out.stderr or ""
+    local http = stderr:match("[Ee]rror: (%d%d%d)") or stderr:match("HTTP[^%d]*(%d%d%d)")
+    local curl_code = stderr:match("curl: %((%d+)%)")
+    local details = http and ("HTTP " .. http) or (curl_code and ("curl error " .. curl_code))
+    return nil, details or (name .. " exit " .. tostring(out.status.code or "unknown"))
+  end
+  return out.stdout
+end
+
+local function json_string(s)
+  return '"' .. s:gsub('[%z\1-\31\\"]', function(c)
+    local escapes = { ['"'] = '\\"', ['\\'] = '\\\\', ['\n'] = '\\n', ['\r'] = '\\r', ['\t'] = '\\t' }
+    return escapes[c] or string.format('\\u%04x', c:byte())
+  end) .. '"'
+end
+
+local function api_commit_msg(cwd, diff, cfg)
+  local api = cfg.ai_commit_api
+  local function fail(message)
+    U.notify("AI commit: " .. message, "error")
+    return ""
+  end
+  if type(api) ~= "table" or type(api.url) ~= "string" or not api.url:match("^https://") or api.url:find("[%c]")
+    or type(api.model) ~= "string" or api.model == ""
+    or type(api.api_key_env) ~= "string" or api.api_key_env == ""
+    or (cfg.ai_commit_prompt ~= nil and type(cfg.ai_commit_prompt) ~= "string") then
+    return fail("configure HTTPS url, model and api_key_env")
+  end
+  local key = os.getenv(api.api_key_env)
+  if not key or key == "" or key:find("[%c]") then return fail("API key is missing or invalid") end
+  local prompt = cfg.ai_commit_prompt or require("git-screen.commit-prompt").default
+  local history = U.run(cwd, { "log", "-2", "--format=%s" }) or ""
+  local context = "Recent commit subjects (for language and style only):\n"
+    .. (history ~= "" and history or "(none available)") .. "\n\nDiff:\n" .. (diff or "")
+  local body = '{"model":' .. json_string(api.model) .. ',"messages":[{"role":"system","content":'
+    .. json_string(prompt) .. '},{"role":"user","content":' .. json_string(context) .. '}]}'
+  -- curl reads its config from stdin, keeping the key and diff out of argv.
+  local function curl_quote(s) return '"' .. s:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"' end
+  local config = 'url = ' .. curl_quote(api.url) .. '\nheader = ' .. curl_quote('Authorization: Bearer ' .. key)
+    .. '\nheader = "Content-Type: application/json"\ndata = ' .. curl_quote(body) .. '\n'
+  U.notify("Generating commit message…")
+  local response, request_error = pipe_command("curl", { "--disable", "--silent", "--show-error", "--fail", "--max-time", "60", "--config", "-" }, config, cwd)
+  if not response then return fail("API request failed: " .. request_error) end
+  local message = pipe_command("jq", { "-er", '.choices[0].message.content | select(type == "string" and length > 0)' }, response, cwd)
+  if not message then return fail("invalid API response (or jq unavailable)") end
+  for _, line in ipairs(U.split_lines(message)) do
+    local subject = U.trim(line)
+    if subject ~= "" then return subject end
+  end
+  return fail("empty API response")
+end
+
 function U.ai_commit_msg(cwd, diff)
   local cfg = U.get_config()
+  if cfg.ai_commit_api ~= nil then return api_commit_msg(cwd, diff, cfg) end
   local cmd = cfg.ai_commit_cmd
   if not cmd or U.trim(cmd) == "" then return "" end
 
